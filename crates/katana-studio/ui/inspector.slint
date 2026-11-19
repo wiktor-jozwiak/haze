@@ -1,9 +1,9 @@
-// Effect inspector: a close-up of the selected pedal. The top is the pedal's face (enclosure
-// colour, silkscreen, type window, colour-memory LEDs, footswitch); below it the parameters
-// sit on a grid of real knobs. Cell positions come precomputed from Rust (col / py).
+// Deep parameter inspector: rack module for the block selected in the signal chain.
+// Left: module header (category stripe, type selector, colour memory, bypass). Right: the
+// parameters on a grid of encoders. Cell positions come precomputed from Rust (col / py).
 import { T } from "theme.slint";
 import { Toggle, Icon, Icons } from "widgets.slint";
-import { LedImg } from "rig.slint";
+import { Led } from "widgets.slint";
 
 export struct ParamRow {
     group: string,
@@ -28,6 +28,7 @@ component BigKnob inherits Rectangle {
     property <float> t: (p.value - p.min) / Math.max(1, p.max - p.min);
     property <int> start-v;
     property <length> start-y;
+    property <bool> fine;
     property <bool> active: ta.pressed || ta.has-hover;
     // arc geometry on a 64×64 grid, 0° = 12 o'clock, clockwise, -135°..+135°
     // bipolar params (e.g. -20..+20 dB) grow the arc from the centre detent
@@ -60,7 +61,7 @@ component BigKnob inherits Rectangle {
             height: 64px;
             viewbox-width: 64;
             viewbox-height: 64;
-            stroke: #ffffff12;
+            stroke: #2A2D35;
             stroke-width: 3px;
             commands: "M " + (32 + r * Math.sin(a0 * 1deg)) + " " + (32 - r * Math.cos(a0 * 1deg))
                 + " A " + r + " " + r + " 0 1 1 " + (32 + r * Math.sin(135deg)) + " " + (32 - r * Math.cos(135deg));
@@ -75,15 +76,24 @@ component BigKnob inherits Rectangle {
             commands: "M " + (32 + r * Math.sin(s0 * 1deg)) + " " + (32 - r * Math.cos(s0 * 1deg))
                 + " A " + r + " " + r + " 0 " + ((hi-t - lo-t) * 270 > 180 ? 1 : 0) + " 1 " + (32 + r * Math.sin(s1 * 1deg)) + " " + (32 - r * Math.cos(s1 * 1deg));
         }
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 48px;
-            height: 48px;
-            source: @image-url("art/knob-insp.png");
-            source-clip-y: round(root.t * 63) * 48;
-            source-clip-width: 48;
-            source-clip-height: 48;
+        cap := Rectangle {
+            x: 12px;
+            y: 12px;
+            width: 40px;
+            height: 40px;
+            border-radius: 20px;
+            background: ta.pressed ? #1A1C22 : #20232A;
+            border-width: 1px;
+            border-color: root.active ? T.line-hi : T.line;
+            Rectangle {
+                property <angle> a: (-135 + root.t * 270) * 1deg;
+                x: 20px + 13px * sin(a) - 2px;
+                y: 20px - 13px * cos(a) - 2px;
+                width: 4px;
+                height: 4px;
+                border-radius: 2px;
+                background: ta.pressed ? root.accent : T.text;
+            }
         }
     }
     Text {
@@ -92,7 +102,8 @@ component BigKnob inherits Rectangle {
         text: p.display;
         horizontal-alignment: center;
         color: ta.pressed ? root.accent : T.text;
-        font-size: 13px;
+        font-family: T.mono;
+        font-size: 12px;
         font-weight: 600;
     }
     ta := TouchArea {
@@ -101,11 +112,12 @@ component BigKnob inherits Rectangle {
             if e.kind == PointerEventKind.down {
                 root.start-v = p.value;
                 root.start-y = self.mouse-y;
+                root.fine = e.modifiers.shift;
             }
         }
         moved => {
             if self.pressed {
-                root.changed(clamp(round(root.start-v + (root.start-y - self.mouse-y) / 180px * (p.max - p.min)), p.min, p.max));
+                root.changed(clamp(round(root.start-v + (root.start-y - self.mouse-y) / (root.fine ? 720px : 180px) * (p.max - p.min)), p.min, p.max));
             }
         }
         scroll-event(e) => {
@@ -150,10 +162,10 @@ component RowCell inherits Rectangle {
             horizontal-stretch: 1;
             Rectangle {
                 height: 34px;
-                border-radius: 6px;
-                background: eta.has-hover ? #24211c : #1c1a16;
+                border-radius: T.r;
+                background: eta.has-hover ? T.hover : T.well;
                 border-width: 1px;
-                border-color: eta.has-hover ? #ffffff1c : #ffffff10;
+                border-color: eta.has-hover ? T.line-hi : T.line;
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 10px;
@@ -204,81 +216,73 @@ export component Inspector inherits Rectangle {
     callback enum-request(int);
 
     property <color> accent: hue.brighter(0.35);
-    property <length> face-w: 300px;
+    property <length> face-w: 260px;
     property <length> cw: (self.width - face-w - 48px) / cols;
 
-    border-radius: 12px;
-    background: #141210;
+    border-radius: 6px;
+    background: T.bg;
+    border-width: 1px;
+    border-color: T.line;
     clip: true;
     TouchArea { }
 
-    // ------------------------------------------------ pedal face
+    // ------------------------------------------------ module header
     face := Rectangle {
         x: 0;
         y: 0;
         width: face-w;
         height: parent.height;
-        background: @linear-gradient(180deg, hue.brighter(0.10) 0%, hue 60%, hue.darker(0.18) 100%);
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("art/grain.png");
-            horizontal-tiling: repeat;
-            vertical-tiling: repeat;
-        }
-        Rectangle { background: @linear-gradient(90deg, #ffffff18 0%, #ffffff00 20%, #00000000 85%, #00000040 100%); }
-        Rectangle {
-            x: parent.width - 1px;
-            width: 1px;
-            background: #00000090;
-        }
+        background: T.panel;
+        // category stripe
+        Rectangle { x: 0; width: 3px; background: root.hue; }
+        Rectangle { x: parent.width - 1px; width: 1px; background: T.line; }
 
-        // silkscreen title + state
         Text {
             x: 22px;
             y: 18px;
             width: parent.width - 44px;
             text: root.title;
-            color: root.ink;
-            font-family: T.display;
+            color: T.text;
+            font-family: T.mono;
             font-weight: 700;
-            font-size: 26px;
-            letter-spacing: 0.5px;
+            font-size: 20px;
+            letter-spacing: 1.5px;
             overflow: elide;
         }
-        Text {
+        HorizontalLayout {
             x: 22px;
-            y: 52px;
-            text: !has-sw ? "zawsze aktywny" : on ? "włączony" : "wyłączony";
-            color: root.ink.with-alpha(0.65);
-            font-size: 12px;
+            y: 50px;
+            height: 14px;
+            spacing: 6px;
+            VerticalLayout { alignment: center; Led { size: 7px; state: !has-sw || on ? 1 : 0; } }
+            Text {
+                text: !has-sw ? "ALWAYS ON" : on ? "ACTIVE" : "BYPASS";
+                color: T.text-3;
+                font-family: T.mono;
+                font-size: 10px;
+                letter-spacing: 1px;
+                vertical-alignment: center;
+            }
         }
 
-        // type window, recessed into the face
+        // type selector
         if has-types: Rectangle {
             x: 22px;
             y: 80px;
             width: parent.width - 44px;
-            height: 40px;
-            border-radius: 6px;
-            background: tya.has-hover ? #0c0b0a : #12100eE6;
+            height: 36px;
+            border-radius: T.r;
+            background: tya.has-hover ? T.hover : T.well;
             border-width: 1px;
-            border-color: #00000080;
-            Rectangle {
-                y: parent.height - 1px;
-                x: 4px;
-                width: parent.width - 8px;
-                height: 1px;
-                background: #ffffff1c;
-            }
+            border-color: tya.has-hover ? T.line-hi : T.line;
             HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 10px;
                 spacing: 8px;
                 Text {
                     text: root.subtitle;
-                    color: #f3ead7;
-                    font-size: 14px;
+                    color: T.text;
+                    font-size: 13px;
                     font-weight: 600;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
@@ -286,7 +290,7 @@ export component Inspector inherits Rectangle {
                 }
                 VerticalLayout {
                     alignment: center;
-                    Icon { d: Icons.chevron-down; size: 16px; tint: #f3ead7a0; }
+                    Icon { d: Icons.chevron-down; size: 16px; tint: T.text-3; }
                 }
             }
             tya := TouchArea {
@@ -297,27 +301,29 @@ export component Inspector inherits Rectangle {
 
         // colour memory: the three LED colours the amp panel can recall
         if variant >= 0: HorizontalLayout {
-            x: 16px;
-            y: has-types ? 132px : 80px;
-            height: 34px;
-            spacing: 2px;
-            for c[i] in ["Zielony", "Czerwony", "Żółty"]: Rectangle {
-                width: cl.preferred-width + 36px;
-                border-radius: 6px;
-                background: i == variant ? #00000050 : vca.has-hover ? #00000028 : transparent;
-                LedImg {
-                    x: 5px;
-                    y: (parent.height - 22px) / 2;
-                    state: i == variant || vca.has-hover ? i + 1 : 0;
-                }
-                cl := Text {
-                    x: 29px;
-                    text: c;
-                    color: i == variant ? #f3ead7 : root.ink.with-alpha(0.75);
-                    font-size: 12px;
-                    font-weight: i == variant ? 600 : 400;
-                    vertical-alignment: center;
-                    height: parent.height;
+            x: 22px;
+            y: has-types ? 128px : 80px;
+            width: parent.width - 44px;
+            height: 30px;
+            spacing: 4px;
+            for c[i] in ["GRN", "RED", "YEL"]: Rectangle {
+                horizontal-stretch: 1;
+                border-radius: T.r;
+                background: i == variant ? T.panel-hi : vca.has-hover ? T.hover : transparent;
+                border-width: 1px;
+                border-color: i == variant ? T.line-hi : T.line;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    VerticalLayout { alignment: center; Led { size: 7px; state: i == variant || vca.has-hover ? i + 1 : 0; } }
+                    Text {
+                        text: c;
+                        color: i == variant ? T.text : T.text-3;
+                        font-family: T.mono;
+                        font-size: 10px;
+                        letter-spacing: 1px;
+                        vertical-alignment: center;
+                    }
                 }
                 vca := TouchArea {
                     mouse-cursor: pointer;
@@ -326,26 +332,37 @@ export component Inspector inherits Rectangle {
             }
         }
 
-        // LED + footswitch at the foot of the enclosure
-        if has-sw: LedImg {
-            x: (parent.width - 22px) / 2;
-            y: parent.height - 96px;
-            state: on ? Math.max(1, variant + 1) : 0;
-        }
-        if has-sw: Image {
-            x: (parent.width - 48px) / 2;
-            y: parent.height - 66px;
-            width: 48px;
-            height: 48px;
-            source: @image-url("art/footswitch.png");
-            Rectangle {
-                visible: fsa.pressed;
-                x: 10px;
-                y: 10px;
-                width: 28px;
-                height: 28px;
-                border-radius: 14px;
-                background: #00000050;
+        // bypass switch
+        if has-sw: Rectangle {
+            x: 22px;
+            y: parent.height - 58px;
+            width: parent.width - 44px;
+            height: 36px;
+            border-radius: T.r;
+            background: fsa.pressed ? T.well : on ? T.accent.with-alpha(0.12) : fsa.has-hover ? T.hover : T.panel-hi;
+            border-width: 1px;
+            border-color: on ? T.accent-lo : T.line-hi;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: on ? T.accent : #2A2D35;
+                    }
+                }
+                Text {
+                    text: on ? "ON" : "BYPASS";
+                    color: on ? T.accent-hi : T.text-2;
+                    font-family: T.mono;
+                    font-weight: 600;
+                    font-size: 11px;
+                    letter-spacing: 1.5px;
+                    vertical-alignment: center;
+                }
             }
             fsa := TouchArea {
                 mouse-cursor: pointer;
@@ -370,7 +387,9 @@ export component Inspector inherits Rectangle {
                 stt := Text {
                     text: sct;
                     color: i == section ? T.text : sta.has-hover ? T.text-2 : T.text-3;
-                    font-size: 13px;
+                    font-family: T.mono;
+                    font-size: 11px;
+                    letter-spacing: 1px;
                     font-weight: i == section ? 600 : 400;
                 }
                 Rectangle {
@@ -387,7 +406,7 @@ export component Inspector inherits Rectangle {
         Rectangle {
             y: parent.height - 1px;
             height: 1px;
-            background: #ffffff0c;
+            background: T.line;
         }
     }
 
@@ -398,7 +417,7 @@ export component Inspector inherits Rectangle {
         width: 32px;
         height: 32px;
         border-radius: 16px;
-        background: xa.has-hover ? #ffffff14 : transparent;
+        background: xa.has-hover ? T.hover : transparent;
         Icon { d: Icons.close; size: 18px; tint: xa.has-hover ? T.text : T.text-3; }
         xa := TouchArea {
             mouse-cursor: pointer;
@@ -423,7 +442,9 @@ export component Inspector inherits Rectangle {
                 y: -26px;
                 text: p.group;
                 color: T.text-3;
-                font-size: 12px;
+                font-family: T.mono;
+                font-size: 10px;
+                letter-spacing: 1px;
                 font-weight: 600;
             }
             if !p.is-enum && !p.is-switch: BigKnob {

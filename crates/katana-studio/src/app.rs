@@ -1,7 +1,7 @@
 //! Application state and UI binding. Runs on the UI thread only.
 
 use crate::panel::{group_of, short, NodeDef, Panel, STATUS};
-use crate::{Essential, KnobVal, MainWindow, MiniKnob, NavItem, Opt, ParamRow, Pedal, Slot, ToneRow};
+use crate::{Essential, KnobVal, MainWindow, MiniKnob, NavItem, Opt, ParamRow, Pedal, Slot, ToneRow, T};
 use katana_core::chain::{self, Node, Routing, PATTERN_NAMES};
 use katana_core::map::{amp_family, amp_name, ParamRef, AMP_PANEL, PATCH_BLOCKS};
 use katana_core::patch::{Led, Patch};
@@ -12,6 +12,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, Vec
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 thread_local! {
@@ -58,6 +59,24 @@ pub struct App {
     /// slot write waiting for its pre-write backup read
     pending_write: Option<(u8, Patch, String)>,
     toast_timer: Timer,
+    /// HARDWARE (Katana USB-MIDI) vs STANDALONE (PC DSP engine). Edits reach the amp only in HARDWARE.
+    hw: bool,
+    /// sidebar tone tag filter: "", "clean", "crunch", "hi-gain", "ambient", "lead"
+    tag: String,
+    /// A/B compare: the snapshot not on screen, and which slot is on screen (0 = A, 1 = B)
+    ab_other: Option<Patch>,
+    ab_slot: i32,
+    // ---- standalone PC DSP engine
+    dsp: Arc<haze_dsp::Params>,
+    engine: Option<haze_dsp::Engine>,
+    audio_cfg: haze_dsp::Config,
+    tuner: Option<haze_dsp::Tuner>,
+    /// voicing chosen on the PC side that the Katana does not have (PUSHED / MODERN)
+    dsp_voicing: Option<i32>,
+    di_on: bool,
+    meter_timer: Timer,
+    meter_tick: u32,
+    clip_hold: [u32; 2],
 }
 
 fn s(x: impl AsRef<str>) -> SharedString {
@@ -149,17 +168,34 @@ impl App {
             layout: vec![],
             pedals,
             pedal_refs: vec![],
-            insp: None,
+            // lower deck starts on the amp, so the inspector is never an empty hole
+            insp: Some(Node::Amp),
             insp_section: 0,
             insp_rows: vec![],
             popup: None,
             pending_write: None,
             toast_timer: Timer::default(),
+            hw: std::env::var_os("HAZE_PC_MODE").is_none(),
+            tag: String::new(),
+            ab_other: None,
+            ab_slot: 0,
+            dsp: Arc::new(haze_dsp::Params::default()),
+            engine: None,
+            audio_cfg: haze_dsp::Config::default(),
+            tuner: None,
+            dsp_voicing: None,
+            // no guitar plugged in is the common first run: start on the DI loop
+            di_on: true,
+            meter_timer: Timer::default(),
+            meter_tick: 0,
+            clip_hold: [0; 2],
         };
         let app = Rc::new(RefCell::new(app));
         APP.with(|a| *a.borrow_mut() = Some(app.clone()));
         bind(ui);
         let mut a = app.borrow_mut();
+        let hw = a.hw;
+        a.set_mode(hw);
         a.refresh_nav();
         a.refresh_list();
         a.refresh_slots();
@@ -266,6 +302,7 @@ impl App {
         };
         self.visible = base
             .into_iter()
+            .filter(|id| self.tag.is_empty() || self.lib.tone(id).is_some_and(|t| tone_tags(&t.patch, self.panel.amp_type).contains(&self.tag.as_str())))
             .filter(|id| {
                 if words.is_empty() {
                     return true;
@@ -340,6 +377,10 @@ impl App {
         self.recent.truncate(8);
         self.edit = t.patch.clone();
         self.saved = t.patch.clone();
+        self.ab_other = None;
+        self.ab_slot = 0;
+        self.dsp_voicing = None;
+        self.refresh_ab();
         self.ui().set_has_selection(true);
         self.sync_selected_index();
         self.refresh_essentials();
@@ -390,6 +431,7 @@ impl App {
             .collect();
         ui.set_knobs(ModelRc::new(VecModel::from(knobs)));
         self.refresh_rig();
+        self.sync_dsp();
     }
 
     // ------------------------------------------------------------------ pedalboard
@@ -499,7 +541,13 @@ impl App {
         ui.set_pedal_selected(self.layout.iter().position(|x| *x == n).map_or(-1, |i| i as i32));
         ui.set_insp_title(s(nice(d.title)));
         ui.set_insp_subtitle(s(nice(&self.type_name(d))));
-        let hue = if n == Node::Amp { slint::Color::from_rgb_u8(0x8a, 0x6c, 0x34) } else { d.hue };
+        // the amp carries the engine-mode accent (amber hardware, cyan standalone), dimmed:
+        // the inspector brightens its hue for arcs and tabs
+        let hue = match (n == Node::Amp, self.hw) {
+            (true, true) => slint::Color::from_rgb_u8(0xb8, 0x70, 0x10),
+            (true, false) => slint::Color::from_rgb_u8(0x00, 0xa0, 0xb4),
+            _ => d.hue,
+        };
         ui.set_insp_hue(hue);
         ui.set_insp_ink(ink_for(hue));
         ui.set_insp_has_sw(d.sw.is_some());
@@ -680,10 +728,274 @@ impl App {
     }
 
     fn is_live(&self) -> bool {
-        self.connected && self.sel.is_some() && self.live == self.sel
+        self.hw && self.connected && self.sel.is_some() && self.live == self.sel
+    }
+
+    // ------------------------------------------------------------------ engine mode, A/B
+
+    fn set_mode(&mut self, hw: bool) {
+        self.hw = hw;
+        let ui = self.ui();
+        ui.global::<T>().set_hw(hw);
+        ui.set_hw_mode(hw);
+        if hw {
+            self.stop_engine();
+        } else if std::env::var_os("KATANA_NO_DEVICE").is_none() {
+            self.start_engine();
+        }
+        // back on the amp: it may have drifted while edits stayed local
+        if self.is_live() {
+            self.dev.send(Cmd::Audition(Box::new(self.edit.clone())));
+        }
+        ui.set_ed_live(self.is_live());
+        if self.sel.is_some() {
+            self.refresh_inspector();
+        }
+    }
+
+    // ------------------------------------------------------------------ PC DSP engine
+
+    fn start_engine(&mut self) {
+        self.stop_engine();
+        self.sync_dsp();
+        self.dsp.set(haze_dsp::P::Source, self.di_on as i32 as f32);
+        match haze_dsp::Engine::start(self.dsp.clone(), &self.audio_cfg) {
+            Ok(e) => {
+                let ui = self.ui();
+                ui.set_audio_host(s(&e.info.host));
+                ui.set_audio_device(s(e.info.output.split(',').next().unwrap_or("default")));
+                ui.set_audio_latency(e.info.latency_ms);
+                ui.set_audio_running(true);
+                if e.info.input.is_none() {
+                    self.toast("Brak wejścia audio: gra odtwarzacz DI", false);
+                }
+                self.tuner = Some(haze_dsp::Tuner::new(e.fs()));
+                self.engine = Some(e);
+                self.meter_timer.start(TimerMode::Repeated, Duration::from_millis(33), || with_app(|a| a.meter_frame()));
+            }
+            Err(e) => self.toast(format!("Silnik audio: {e}"), true),
+        }
+    }
+
+    fn stop_engine(&mut self) {
+        self.meter_timer.stop();
+        self.engine = None;
+        self.tuner = None;
+        let ui = self.ui();
+        ui.set_audio_running(false);
+        ui.set_in_level(0.0);
+        ui.set_out_level(0.0);
+        ui.set_tuner_active(false);
+        ui.set_tuner_note(s("—"));
+    }
+
+    /// 30 Hz while the engine runs: meters, clip LEDs, tuner. Nothing runs in HARDWARE mode.
+    fn meter_frame(&mut self) {
+        let Some(e) = self.engine.as_mut() else { return };
+        e.collect_trash();
+        let m = e.meters.clone();
+        let mut fresh = vec![];
+        while let Ok(x) = e.tuner.pop() {
+            fresh.push(x);
+        }
+        let ui = self.ui();
+        // meter ballistics: instant rise, ~300 ms fall
+        let fall = |cur: f32, new: f32| if new > cur { new } else { cur * 0.82 };
+        ui.set_in_level(fall(ui.get_in_level(), haze_dsp::Meters::take_peak(&m.in_peak)));
+        ui.set_out_level(fall(ui.get_out_level(), haze_dsp::Meters::take_peak(&m.out_peak)));
+        for (i, flag) in [&m.in_clip, &m.out_clip].into_iter().enumerate() {
+            if flag.swap(0, std::sync::atomic::Ordering::Relaxed) != 0 {
+                self.clip_hold[i] = 45;
+            }
+            self.clip_hold[i] = self.clip_hold[i].saturating_sub(1);
+        }
+        ui.set_in_clip(self.clip_hold[0] > 0);
+        ui.set_out_clip(self.clip_hold[1] > 0);
+        self.meter_tick = self.meter_tick.wrapping_add(1);
+        if let Some(t) = self.tuner.as_mut() {
+            for x in fresh {
+                t.push(x);
+            }
+            // pitch every other frame (15 Hz) is plenty for a tuner
+            if self.meter_tick % 2 == 0 {
+                match t.estimate() {
+                    Some(p) => {
+                        ui.set_tuner_active(true);
+                        ui.set_tuner_note(s(format!("{}{}", p.note, p.octave)));
+                        ui.set_tuner_cents(p.cents);
+                    }
+                    None => ui.set_tuner_active(false),
+                }
+            }
+        }
+    }
+
+    fn set_di(&mut self, on: bool) {
+        self.di_on = on;
+        self.dsp.set(haze_dsp::P::Source, on as i32 as f32);
+        if on {
+            if let Some(e) = self.engine.as_mut() {
+                e.send(haze_dsp::Cmd::RewindDi);
+            }
+        }
+        self.ui().set_di_on(on);
+    }
+
+    /// Mirror the edited Katana patch into the PC engine's parameters (cheap: atomics only).
+    fn sync_dsp(&mut self) {
+        use haze_dsp::P;
+        let d = self.dsp.clone();
+        let e = &self.edit;
+        let norm = |r: ParamRef| {
+            let v = e.get(r) as f32;
+            ((v - r.param.min as f32) / ((r.param.max - r.param.min) as f32).max(1.0)).clamp(0.0, 1.0)
+        };
+        // amp panel knobs
+        for k in &self.panel.knobs {
+            let v = norm(k.r);
+            match k.label.to_uppercase().as_str() {
+                "GAIN" => d.set(P::AmpGain, v),
+                "BASS" => d.set(P::AmpBass, v),
+                "MIDDLE" => d.set(P::AmpMid, v),
+                "TREBLE" => d.set(P::AmpTreble, v),
+                "PRESENCE" => d.set(P::AmpPresence, v),
+                "VOLUME" => d.set(P::AmpMaster, v),
+                _ => {}
+            }
+        }
+        let voicing = self.dsp_voicing.unwrap_or_else(|| match amp_family(e.get(self.panel.amp_type)) {
+            Some((0, _)) => 0,
+            Some((1, false)) => 1,
+            Some((1, true)) => 2,
+            Some((2, _)) => 3,
+            Some((3, _)) => 4,
+            Some((4, false)) => 5,
+            Some((4, true)) => 6,
+            _ => 1,
+        });
+        d.set(P::AmpVoicing, voicing as f32);
+        d.set(P::CabIr, match voicing { 0 => 0.0, 1 | 2 => 1.0, _ => 2.0 });
+        d.set(P::AmpSag, if voicing >= 3 { 0.45 } else { 0.25 });
+
+        // pedals: on/off, type, and the knobs found by name in the first section
+        let node = |n: Node| self.panel.node(n);
+        let find = |n: Node, keys: &[&str]| -> Option<ParamRef> {
+            let nd = node(n);
+            self.panel.section_params(&nd.sections[0], e).into_iter().find(|r| keys.iter().any(|k| r.param.name.contains(k)))
+        };
+        let knob = |n: Node, keys: &[&str], def: f32| find(n, keys).map_or(def, norm);
+        let ty = |n: Node| self.type_name(node(n)).to_uppercase();
+
+        d.set(P::GateOn, self.node_on(node(Node::Ns)) as i32 as f32);
+        d.set(P::GateThreshDb, -80.0 + 50.0 * knob(Node::Ns, &["THRESHOLD"], 0.3));
+
+        let bt = ty(Node::Booster);
+        d.set(P::DriveOn, self.node_on(node(Node::Booster)) as i32 as f32);
+        let model = if bt.contains("CENTA") || bt.contains("KLON") {
+            1
+        } else if bt.contains("BLUES") {
+            2
+        } else if bt.contains("RAT") || bt.contains("DST") || bt.contains("DIST") {
+            3
+        } else if bt.contains("FUZZ") || bt.contains("MUFF") {
+            4
+        } else if bt.contains("METAL") || bt.contains("MT") || bt.contains("HM") {
+            5
+        } else if bt.contains("SCREAM") || bt.contains("OD") || bt.contains("TS") {
+            0
+        } else {
+            2
+        };
+        d.set(P::DriveModel, model as f32);
+        d.set(P::DriveAmt, knob(Node::Booster, &["DRIVE"], 0.5));
+        d.set(P::DriveTone, knob(Node::Booster, &["TONE"], 0.5));
+        d.set(P::DriveLevel, knob(Node::Booster, &["LEVEL"], 0.5));
+
+        // MOD block, or FX when MOD is off
+        let mod_kind = |t: &str| {
+            if t.contains("CHORUS") {
+                Some(0)
+            } else if t.contains("FLANGER") {
+                Some(1)
+            } else if t.contains("PHASER") {
+                Some(2)
+            } else if t.contains("TREMOLO") {
+                Some(3)
+            } else if t.contains("ROTARY") || t.contains("UNI-V") || t.contains("VIBE") {
+                Some(4)
+            } else {
+                None
+            }
+        };
+        let pick = [Node::Mod, Node::Fx].into_iter().find_map(|n| if self.node_on(node(n)) { mod_kind(&ty(n)).map(|k| (n, k)) } else { None });
+        d.set(P::ModOn, pick.is_some() as i32 as f32);
+        if let Some((n, k)) = pick {
+            d.set(P::ModType, k as f32);
+            d.set(P::ModRate, 0.1 + 7.9 * knob(n, &["RATE"], 0.3).powi(2));
+            d.set(P::ModDepth, knob(n, &["DEPTH"], 0.5));
+            d.set(P::ModMix, if k == 3 { 1.0 } else { 0.5 });
+        }
+
+        d.set(P::DelayOn, self.node_on(node(Node::Delay)) as i32 as f32);
+        if let Some(r) = find(Node::Delay, &["TIME"]) {
+            let v = e.get(r) as f32;
+            d.set(P::DelayMs, if r.param.max >= 1000 { v } else { 20.0 + norm(r) * 1980.0 });
+        }
+        d.set(P::DelayFeedback, 0.9 * knob(Node::Delay, &["FEEDBACK", "F.BACK"], 0.35));
+        d.set(P::DelayMix, 0.8 * knob(Node::Delay, &["EFFECT LEVEL", "LEVEL"], 0.4));
+        let dt = ty(Node::Delay);
+        d.set(P::DelayPingPong, (dt.contains("PAN") || dt.contains("STEREO") || dt.contains("PING")) as i32 as f32);
+
+        d.set(P::ReverbOn, self.node_on(node(Node::Reverb)) as i32 as f32);
+        let rt = ty(Node::Reverb);
+        d.set(
+            P::ReverbType,
+            if rt.contains("HALL") {
+                1.0
+            } else if rt.contains("SPRING") {
+                2.0
+            } else if rt.contains("MODULATE") || rt.contains("SHIMMER") {
+                3.0
+            } else {
+                0.0
+            },
+        );
+        d.set(P::ReverbDecay, knob(Node::Reverb, &["TIME"], 0.5));
+        d.set(P::ReverbMix, 0.9 * knob(Node::Reverb, &["EFFECT LEVEL", "LEVEL"], 0.3));
+        self.ui().set_dsp_voicing(self.dsp_voicing.unwrap_or(-1));
+    }
+
+    fn refresh_ab(&self) {
+        let ui = self.ui();
+        ui.set_ab_slot(self.ab_slot);
+        ui.set_ab_has_b(self.ab_other.is_some() || self.ab_slot == 1);
+    }
+
+    /// Show snapshot `slot`. First visit to B makes it a copy of A; after that the two swap.
+    fn ab_pick(&mut self, slot: i32) {
+        if slot == self.ab_slot || self.sel.is_none() {
+            return;
+        }
+        match self.ab_other.as_mut() {
+            None => {
+                self.ab_other = Some(self.edit.clone());
+                self.toast("B = kopia A. Zmieniaj B, porównuj klawiszem A/B", false);
+            }
+            Some(other) => {
+                std::mem::swap(&mut self.edit, other);
+                if self.is_live() {
+                    self.dev.send(Cmd::Audition(Box::new(self.edit.clone())));
+                }
+            }
+        }
+        self.ab_slot = slot;
+        self.refresh_ab();
+        self.refresh_editor();
+        self.after_edit();
     }
 
     fn after_edit(&mut self) {
+        self.sync_dsp();
         let ui = self.ui();
         ui.set_ed_dirty(self.edit != self.saved);
         if let Some(id) = self.sel.clone() {
@@ -892,6 +1204,25 @@ fn abbr(name: &str) -> String {
 
 /// "EFFECT LEVEL" -> "Effect Level"; short tokens (SW, EQ, 2x2) stay as they are.
 /// Silkscreen colour: dark on bright enclosures, cream on dark ones.
+/// Library tags derived from the patch: amp family plus an "ambient" flag for clean tones
+/// with both delay and reverb on.
+fn tone_tags(p: &Patch, amp_type: ParamRef) -> Vec<&'static str> {
+    let mut v = vec![];
+    let fam = amp_family(p.get(amp_type)).map(|(f, _)| f);
+    match fam {
+        Some(0 | 1) => v.push("clean"),
+        Some(2) => v.push("crunch"),
+        Some(3) => v.push("lead"),
+        Some(4) => v.push("hi-gain"),
+        _ => {}
+    }
+    let sm = p.summary();
+    if matches!(fam, Some(0 | 1)) && sm.leds[3] != Led::Off && sm.leds[4] != Led::Off {
+        v.push("ambient");
+    }
+    v
+}
+
 fn ink_for(hue: slint::Color) -> slint::Color {
     if 0.299 * hue.red() as f32 + 0.587 * hue.green() as f32 + 0.114 * hue.blue() as f32 > 140.0 {
         slint::Color::from_argb_u8(235, 18, 14, 10)
@@ -1040,6 +1371,7 @@ fn bind(ui: &MainWindow) {
         a.after_edit();
     }));
     ui.on_amp_family(|f| with_app(|a| {
+        a.dsp_voicing = None;
         let var = a.ui().get_ed_amp_var();
         let (_, n, vv) = AMP_PANEL[f as usize];
         let at = a.panel.amp_type;
@@ -1187,6 +1519,45 @@ fn bind(ui: &MainWindow) {
         a.after_edit();
     }));
     ui.on_audition(|| with_app(audition));
+    ui.on_mode_picked(|hw| with_app(|a| {
+        a.set_mode(hw);
+        a.toast(if hw { "Tryb HARDWARE: edycja synchronizuje Katanę" } else { "Tryb STANDALONE: silnik PC DSP (w budowie), Katana nie dostaje zmian" }, false);
+    }));
+    ui.on_audio_buffer_picked(|b| with_app(|a| {
+        a.audio_cfg.buffer = b as u32;
+        a.ui().set_audio_buffer(b);
+        if a.engine.is_some() {
+            a.start_engine();
+        }
+    }));
+    ui.on_audio_rate_picked(|r| with_app(|a| {
+        a.audio_cfg.rate = r as u32;
+        a.ui().set_audio_rate(r);
+        if a.engine.is_some() {
+            a.start_engine();
+        }
+    }));
+    ui.on_limiter_toggled(|on| with_app(|a| {
+        a.dsp.set(haze_dsp::P::Limiter, on as i32 as f32);
+        a.ui().set_limiter(on);
+    }));
+    ui.on_di_toggled(|on| with_app(|a| a.set_di(on)));
+    ui.on_transport(|| with_app(|a| {
+        if !a.hw {
+            let on = !a.di_on;
+            a.set_di(on);
+        }
+    }));
+    ui.on_dsp_voicing_picked(|v| with_app(|a| {
+        a.dsp_voicing = Some(v);
+        a.sync_dsp();
+    }));
+    ui.on_ab_picked(|i| with_app(|a| a.ab_pick(i)));
+    ui.on_tag_picked(|t| with_app(|a| {
+        a.tag = t.to_string();
+        a.ui().set_tag(t);
+        a.refresh_list();
+    }));
     ui.on_save(|| with_app(|a| {
         let Some(id) = a.sel.clone() else { return };
         let p = a.edit.clone();

@@ -50,7 +50,7 @@ export component Btn inherits Rectangle {
     min-width: lbl.preferred-width + (compact ? 20px : 32px);
     border-radius: T.r;
     background: !enabled ? transparent
-        : primary ? (ta.pressed ? T.gold-lo : ta.has-hover ? T.gold-hi : T.gold)
+        : primary ? (ta.pressed ? T.accent-lo : ta.has-hover ? T.accent-hi : T.accent)
         : (ta.pressed ? T.line : ta.has-hover ? T.hover : T.panel-hi);
     border-width: primary ? 0 : 1px;
     border-color: !enabled ? T.line : danger && ta.has-hover ? T.danger : T.line-hi;
@@ -59,7 +59,7 @@ export component Btn inherits Rectangle {
         text: root.text;
         font-weight: 600;
         font-size: compact ? 12px : 13px;
-        color: !enabled ? T.text-3 : primary ? T.gold-ink : danger && ta.has-hover ? T.danger : T.text;
+        color: !enabled ? T.text-3 : primary ? T.accent-ink : danger && ta.has-hover ? T.danger : T.text;
     }
     ta := TouchArea {
         enabled: root.enabled;
@@ -111,7 +111,7 @@ export component Toggle inherits Rectangle {
     }
 }
 
-/// Amp-style knob: brass LED dot ring (no paths, renders on any backend), drag / wheel / double-click reset.
+/// Precision rotary encoder: LED dot ring, drag (Shift = fine x4), wheel, double-click reset.
 export component Knob inherits Rectangle {
     in property <string> label;
     in property <int> value;
@@ -120,17 +120,20 @@ export component Knob inherits Rectangle {
     in property <int> reset: 50;
     in property <string> display: value;
     in property <length> dial: 62px;
+    in property <bool> enabled: true;
     callback changed(int);
 
     property <float> t: (value - min) / Math.max(1, max - min);
     property <int> drag-start-value;
     property <length> drag-start-y;
+    property <bool> fine;
     property <length> cx: dial / 2;
     property <length> ring: dial / 2 - 3px;
     property <int> dots: 25;
 
     min-width: dial + 20px;
     height: dial + 40px;
+    opacity: enabled ? 1 : 0.4;
 
     VerticalLayout {
         spacing: 6px;
@@ -149,46 +152,48 @@ export component Knob inherits Rectangle {
                 border-radius: self.width / 2;
                 x: root.cx + root.ring * cos(a) - self.width / 2;
                 y: root.cx + root.ring * sin(a) - self.width / 2;
-                background: lit ? T.gold : #2e2922;
+                background: lit ? T.accent : #2A2D35;
             }
-            // cap
+            // machined cap
             cap := Rectangle {
                 width: root.dial - 18px;
                 height: self.width;
                 x: 9px;
                 y: 9px;
                 border-radius: self.width / 2;
-                background: @radial-gradient(circle, #2f2a24 0%, #1a1714 70%, #121010 100%);
+                background: ta.pressed ? #1A1C22 : #20232A;
                 border-width: 1px;
-                border-color: ta.has-hover || ta.pressed ? T.gold-lo : #3a332a;
-                // pointer
+                border-color: ta.has-hover || ta.pressed ? T.accent-lo : T.line-hi;
+                // indicator line
                 Rectangle {
                     property <angle> a: (135 + root.t * 270) * 1deg;
                     property <length> pr: cap.width / 2 - 7px;
-                    width: 5px;
-                    height: 5px;
-                    border-radius: 2.5px;
-                    x: cap.width / 2 + self.pr * cos(a) - 2.5px;
-                    y: cap.width / 2 + self.pr * sin(a) - 2.5px;
-                    background: T.text;
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 2px;
+                    x: cap.width / 2 + self.pr * cos(a) - 2px;
+                    y: cap.width / 2 + self.pr * sin(a) - 2px;
+                    background: ta.pressed ? T.accent-hi : T.text;
                 }
             }
             ta := TouchArea {
+                enabled: root.enabled;
                 mouse-cursor: ns-resize;
                 pointer-event(e) => {
                     if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
                         root.drag-start-value = root.value;
                         root.drag-start-y = self.mouse-y;
+                        root.fine = e.modifiers.shift;
                     }
                 }
                 moved => {
                     if self.pressed {
-                        root.changed(clamp(round(root.drag-start-value + (root.drag-start-y - self.mouse-y) / 160px * (root.max - root.min)), root.min, root.max));
+                        root.changed(clamp(round(root.drag-start-value + (root.drag-start-y - self.mouse-y) / (root.fine ? 640px : 160px) * (root.max - root.min)), root.min, root.max));
                     }
                 }
                 double-clicked => { root.changed(root.reset); }
                 scroll-event(e) => {
-                    root.changed(clamp(root.value + (e.delta-y > 0 ? 1 : -1) * Math.max(1, round((root.max - root.min) / 100)), root.min, root.max));
+                    root.changed(clamp(root.value + (e.delta-y > 0 ? 1 : -1) * (e.modifiers.shift ? 1 : Math.max(1, round((root.max - root.min) / 100))), root.min, root.max));
                     accept
                 }
             }
@@ -197,19 +202,19 @@ export component Knob inherits Rectangle {
         Text {
             text: root.display;
             horizontal-alignment: center;
-            color: ta.pressed ? T.gold-hi : T.text;
-            font-family: T.display;
-            font-size: 15px;
-            font-weight: 700;
+            color: ta.pressed ? T.accent-hi : T.text;
+            font-family: T.mono;
+            font-size: 13px;
+            font-weight: 600;
         }
         Text {
             text: root.label;
             horizontal-alignment: center;
             color: T.text-2;
-            font-family: T.display;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1.5px;
+            font-family: T.mono;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 1.2px;
         }
     }
 }
@@ -220,15 +225,15 @@ export component Seg inherits Rectangle {
     callback clicked;
     height: 30px;
     border-radius: 4px;
-    background: active ? T.gold : ta.has-hover ? T.hover : transparent;
+    background: active ? T.accent : ta.has-hover ? T.hover : transparent;
     animate background { duration: 100ms; }
     Text {
         text: root.text;
-        font-family: T.display;
-        font-weight: 700;
-        font-size: 12px;
-        letter-spacing: 1px;
-        color: root.active ? T.gold-ink : T.text-2;
+        font-family: T.mono;
+        font-weight: 600;
+        font-size: 11px;
+        letter-spacing: 0.8px;
+        color: root.active ? T.accent-ink : T.text-2;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -245,7 +250,7 @@ export component SearchField inherits Rectangle {
     border-radius: T.r;
     background: T.bg;
     border-width: 1px;
-    border-color: input.has-focus ? T.gold-lo : T.line;
+    border-color: input.has-focus ? T.accent-lo : T.line;
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;

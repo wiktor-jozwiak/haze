@@ -10,6 +10,7 @@ name = "haze"
 path = "src/main.rs"
 
 [dependencies]
+haze-dsp = { version = "0.1.0", path = "../haze-dsp" }
 katana-core = { path = "../katana-core" }
 katana-midi = { path = "../katana-midi" }
 libc = "0.2"

@@ -35,7 +35,7 @@ export struct Essential {
 
 export global SidebarMetrics {
     out property <length> rail: 64px;
-    out property <length> open: 304px;
+    out property <length> open: 260px;
 }
 
 component Tile inherits Rectangle {
@@ -45,32 +45,25 @@ component Tile inherits Rectangle {
     callback clicked;
     width: size;
     height: show-name ? size + 22px : size;
-    // a tiny amp face: tolex, a strip in the amp-family colour, brass initials
+    // shortcut tile: aluminium chip, amp-family stripe, mono initials
     sq := Rectangle {
         y: 0;
         width: root.size;
         height: root.size;
         border-radius: 6px;
         clip: true;
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("art/tolex.png");
-            horizontal-tiling: repeat;
-            vertical-tiling: repeat;
-        }
+        background: T.panel;
         Rectangle {
-            y: parent.height - 5px;
-            height: 5px;
+            y: 0;
+            height: 3px;
             background: e.color;
         }
         Text {
-            y: (parent.height - 5px - self.height) / 2;
+            y: (parent.height + 3px - self.height) / 2;
             text: e.abbr;
-            color: ta.has-hover || e.selected ? #f0d999 : #c9ab68;
-            font-family: T.display;
+            color: ta.has-hover || e.selected ? T.text : T.text-2;
+            font-family: T.mono;
             font-weight: 700;
-            font-italic: true;
             font-size: root.size * 0.34;
         }
         if e.live: LedImg {
@@ -87,7 +80,7 @@ component Tile inherits Rectangle {
         height: root.size;
         border-radius: 6px;
         border-width: 1px;
-        border-color: e.selected ? #e2c47f : ta.has-hover ? #ffffff30 : #ffffff14;
+        border-color: e.selected ? T.accent : ta.has-hover ? T.line-hi : T.line;
     }
     if show-name: Text {
         y: root.size + 6px;
@@ -114,7 +107,7 @@ component RailIcon inherits Rectangle {
     width: 40px;
     height: 40px;
     border-radius: 10px;
-    background: active ? #ffffff10 : ta.has-hover ? #ffffff08 : transparent;
+    background: active ? T.line : ta.has-hover ? T.panel : transparent;
     Icon {
         d: icon;
         size: 20px;
@@ -133,7 +126,7 @@ component NavRow inherits Rectangle {
     height: item.kind < 2 ? 0px : item.kind == 4 ? 34px : 36px;
     visible: item.kind >= 2;
     border-radius: 8px;
-    background: item.kind == 4 ? transparent : selected ? #ffffff10 : ta.has-hover ? #ffffff08 : transparent;
+    background: item.kind == 4 ? transparent : selected ? T.line : ta.has-hover ? T.panel : transparent;
     if item.kind == 4: Text {
         x: 12px;
         text: item.name;
@@ -184,8 +177,9 @@ component ToneItem inherits Rectangle {
     callback activated;
     callback fav;
     height: 50px;
-    border-radius: 8px;
-    background: selected ? #ffffff10 : ta.has-hover ? #ffffff07 : transparent;
+    border-radius: T.r;
+    background: selected ? T.panel-hi : ta.has-hover ? T.panel : transparent;
+    if selected: Rectangle { x: 0; y: 8px; width: 2px; height: parent.height - 16px; background: T.accent; }
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -200,8 +194,8 @@ component ToneItem inherits Rectangle {
             spacing: 6px;
             Text {
                 text: tone.name;
-                color: root.selected ? #ffffff : #e4dccd;
-                font-size: 14px;
+                color: root.selected ? T.text : #C9CDD6;
+                font-size: 13px;
                 font-weight: root.selected ? 600 : 500;
                 overflow: elide;
                 horizontal-stretch: 1;
@@ -220,15 +214,18 @@ component ToneItem inherits Rectangle {
             Text {
                 text: tone.amp;
                 color: T.text-2;
-                font-size: 12px;
+                font-family: T.mono;
+                font-size: 10.5px;
                 horizontal-stretch: 0;
+                vertical-alignment: center;
             }
             Text {
                 text: tone.fx != "" ? "  ·  " + tone.fx : "";
                 color: T.text-3;
-                font-size: 12px;
+                font-size: 11px;
                 overflow: elide;
                 horizontal-stretch: 1;
+                vertical-alignment: center;
             }
         }
     }
@@ -239,7 +236,7 @@ component ToneItem inherits Rectangle {
             d: Icons.star;
             size: 15px;
             filled: tone.fav;
-            tint: tone.fav ? T.gold : fta.has-hover ? T.text-2 : T.text-3;
+            tint: tone.fav ? T.accent : fta.has-hover ? T.text-2 : T.text-3;
         }
         fta := TouchArea {
             mouse-cursor: pointer;
@@ -272,7 +269,7 @@ component Tab inherits Rectangle {
     Rectangle {
         y: parent.height - 2px;
         height: 2px;
-        background: active ? T.gold : transparent;
+        background: active ? T.accent : transparent;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -288,7 +285,9 @@ export component LibrarySidebar inherits Rectangle {
     in property <int> selected-index: -1;
     in property <[Essential]> essentials;
     in property <bool> connected;
+    in property <string> tag;
     in-out property <bool> pinned;
+    callback tag-picked(string);
     callback search(string);
     callback nav-clicked(string);
     callback tone-clicked(int);
@@ -314,7 +313,7 @@ export component LibrarySidebar inherits Rectangle {
     if expanded && !pinned: Rectangle {
         x: parent.width - 1px;
         width: 1px;
-        background: #ffffff10;
+        background: T.line;
     }
 
     hover := TouchArea {
@@ -339,7 +338,7 @@ export component LibrarySidebar inherits Rectangle {
                 Rectangle {
                     width: 28px;
                     height: 1px;
-                    background: #ffffff14;
+                    background: T.line;
                 }
             }
             HorizontalLayout {
@@ -401,11 +400,11 @@ export component LibrarySidebar inherits Rectangle {
                 Rectangle {
                     width: 36px;
                     border-radius: 8px;
-                    background: pin.has-hover ? #ffffff0c : transparent;
+                    background: pin.has-hover ? T.line : transparent;
                     Icon {
                         d: Icons.panel;
                         size: 18px;
-                        tint: root.pinned ? T.gold : pin.has-hover ? T.text-2 : T.text-3;
+                        tint: root.pinned ? T.accent : pin.has-hover ? T.text-2 : T.text-3;
                     }
                     pin := TouchArea {
                         mouse-cursor: pointer;
@@ -446,7 +445,34 @@ export component LibrarySidebar inherits Rectangle {
                 Rectangle {
                     y: parent.height - 1px;
                     height: 1px;
-                    background: #ffffff0c;
+                    background: T.line;
+                }
+            }
+            // tone tags
+            if !show-sets: Rectangle {
+                height: 2 * 24px + 4px;
+                for t[i] in [{ id: "", n: "ALL" }, { id: "clean", n: "CLEAN" }, { id: "crunch", n: "CRUNCH" },
+                             { id: "hi-gain", n: "HI-GAIN" }, { id: "ambient", n: "AMBIENT" }, { id: "lead", n: "LEAD" }]: Rectangle {
+                    x: mod(i, 3) * (parent.width + 4px) / 3;
+                    y: floor(i / 3) * 28px;
+                    width: (parent.width - 8px) / 3;
+                    height: 24px;
+                    border-radius: 3px;
+                    background: t.id == tag ? T.accent.with-alpha(0.12) : tga.has-hover ? T.hover : T.well;
+                    border-width: 1px;
+                    border-color: t.id == tag ? T.accent-lo : T.line;
+                    Text {
+                        text: t.n;
+                        color: t.id == tag ? T.accent-hi : T.text-2;
+                        font-family: T.mono;
+                        font-size: 10px;
+                        font-weight: 600;
+                        letter-spacing: 0.8px;
+                    }
+                    tga := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { tag-picked(t.id); }
+                    }
                 }
             }
             // shortcuts
@@ -455,17 +481,19 @@ export component LibrarySidebar inherits Rectangle {
                 alignment: start;
                 spacing: 8px;
                 Text {
-                    text: "Skróty";
+                    text: "SKRÓTY";
                     color: T.text-3;
-                    font-size: 12px;
+                    font-family: T.mono;
+                    letter-spacing: 1px;
+                    font-size: 10px;
                     font-weight: 600;
                 }
                 Rectangle {
-                    height: ceil(essentials.length / 4) * 78px;
+                    height: ceil(essentials.length / 4) * 72px;
                     for e[i] in essentials: Tile {
-                        x: mod(i, 4) * 70px + 4px;
+                        x: mod(i, 4) * 59px + 2px;
                         y: floor(i / 4) * 78px;
-                        size: 52px;
+                        size: 46px;
                         show-name: true;
                         e: e;
                         clicked => { essential-clicked(e.id); }

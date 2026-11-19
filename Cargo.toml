@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/katana-core", "crates/katana-midi", "crates/katana-studio", "crates/katana-art"]
+members = ["crates/katana-core", "crates/katana-midi", "crates/katana-studio", "crates/katana-art", "crates/haze-dsp"]
 
 [workspace.package]
 version = "0.1.0"

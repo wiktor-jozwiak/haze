@@ -6,7 +6,9 @@
 //! `haze list`               print the library
 //! `haze dump <tone>`        every parameter as BLOCK.PRM=value
 //! `haze derive <base> <name> BLOCK.PRM=value…`  new tone from a copy of <base>, saved to the library
-//! `haze --png out.png [--tab N] [--hover X,Y]`  render one frame offscreen (CPU renderer) for visual checks
+//! `haze dsp-render out.wav [s]` render the DI riff through the PC DSP chain
+//! `haze dsp-probe`          open the audio device muted for 3 s, report callback load
+//! `haze --png out.png [--tab N] [--hover X,Y] [--size WxH]`  render one frame offscreen (CPU renderer) for visual checks
 
 mod app;
 mod panel;
@@ -59,7 +61,52 @@ fn main() {
                 let (x, y) = v.split_once(',')?;
                 Some((x.parse().ok()?, y.parse().ok()?))
             });
-            snapshot::render(lib, &out, tab, hover, 1600, 1000);
+            let (w, h) = args
+                .iter()
+                .position(|a| a == "--size")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|v| {
+                    let (w, h) = v.split_once('x')?;
+                    Some((w.parse().ok()?, h.parse().ok()?))
+                })
+                .unwrap_or((1600, 1000));
+            snapshot::render(lib, &out, tab, hover, w, h);
+        }
+        Some("dsp-render") => {
+            // offline render of the built-in DI riff through the PC chain (drive, cab, delay, reverb)
+            let out = args.get(1).cloned().unwrap_or_else(|| "haze-dsp.wav".into());
+            let secs: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(9.6);
+            let p = std::sync::Arc::new(haze_dsp::Params::default());
+            use haze_dsp::P;
+            for (k, v) in [(P::DriveOn, 1.0), (P::AmpVoicing, 3.0), (P::AmpGain, 0.6), (P::DelayOn, 1.0), (P::ReverbOn, 1.0), (P::ModOn, 1.0)] {
+                p.set(k, v);
+            }
+            let fs = 48000;
+            let t = std::time::Instant::now();
+            let buf = haze_dsp::render_offline(p, fs as f32, secs);
+            let el = t.elapsed();
+            match haze_dsp::write_wav(std::path::Path::new(&out), fs, &buf) {
+                Ok(()) => println!("{out}: {secs} s, rendered in {:.0} ms", el.as_secs_f32() * 1000.0),
+                Err(e) => eprintln!("{e}"),
+            }
+        }
+        Some("dsp-probe") => {
+            // open the real audio device for 3 s with the output muted: proves cpal I/O + load
+            let p = std::sync::Arc::new(haze_dsp::Params::default());
+            p.set(haze_dsp::P::Source, 1.0);
+            p.set(haze_dsp::P::OutGainDb, -120.0);
+            match haze_dsp::Engine::start(p, &haze_dsp::Config::default()) {
+                Ok(e) => {
+                    println!("{:?}", e.info);
+                    let mut worst = 0f32;
+                    for _ in 0..30 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        worst = worst.max(e.load());
+                    }
+                    println!("callback load peak {:.1}%, xruns {}", worst * 100.0, e.meters.xruns.load(std::sync::atomic::Ordering::Relaxed));
+                }
+                Err(e) => eprintln!("engine: {e}"),
+            }
         }
         Some("probe") => probe(&lib, args.get(1).map(String::as_str)),
         Some("dump") => {

@@ -1,11 +1,11 @@
 import { ListView } from "std-widgets.slint";
 import { T } from "theme.slint";
-import { Label, Btn, Led, Toggle, SearchField, Icon, Icons } from "widgets.slint";
-import { AmpHead, PedalView, Pedal, MiniKnob, KnobVal, Cable, Jack, LedImg } from "rig.slint";
+import { Label, Btn, Led, Toggle, SearchField, Icon, Icons, Seg } from "widgets.slint";
+import { AmpCore, PedalView, ChainNode, Wire, Pedal, MiniKnob, KnobVal, LedImg } from "rig.slint";
 import { LibrarySidebar, ToneRow, NavItem, Essential, SidebarMetrics } from "sidebar.slint";
 import { Inspector, ParamRow } from "inspector.slint";
 
-export { Pedal, MiniKnob, KnobVal, ToneRow, NavItem, Essential, ParamRow }
+export { T, Pedal, MiniKnob, KnobVal, ToneRow, NavItem, Essential, ParamRow }
 
 export struct Slot {
     label: string,
@@ -64,10 +64,10 @@ component MenuItem inherits Rectangle {
 }
 
 component Menu inherits Rectangle {
-    background: #1b1915;
-    border-radius: 10px;
+    background: T.panel-hi;
+    border-radius: 6px;
     border-width: 1px;
-    border-color: #ffffff14;
+    border-color: T.line-hi;
     drop-shadow-blur: 24px;
     drop-shadow-offset-y: 10px;
     drop-shadow-color: #000000c0;
@@ -80,10 +80,10 @@ component SlotChip inherits Rectangle {
     callback pull;
     callback push;
     height: 40px;
-    border-radius: 8px;
-    background: slot.current ? #2a2419 : ta.has-hover ? #1c1a16 : transparent;
+    border-radius: T.r;
+    background: slot.current ? T.panel-hi : ta.has-hover ? T.panel : transparent;
     border-width: slot.current ? 1px : 0;
-    border-color: T.gold-lo;
+    border-color: T.accent-lo;
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -94,10 +94,10 @@ component SlotChip inherits Rectangle {
         spacing: 8px;
         Text {
             text: slot.label;
-            color: slot.current ? T.gold-hi : T.text-3;
-            font-family: T.display;
+            color: slot.current ? T.accent-hi : T.text-3;
+            font-family: T.mono;
             font-weight: 700;
-            font-size: 11px;
+            font-size: 10.5px;
             letter-spacing: 1px;
             vertical-alignment: center;
         }
@@ -130,6 +130,135 @@ component SlotChip inherits Rectangle {
     }
 }
 
+// ---------------------------------------------------------------- top bar parts
+
+/// One half of the HARDWARE / STANDALONE switch.
+component ModeSeg inherits Rectangle {
+    in property <string> title;
+    in property <string> sub;
+    in property <color> led;
+    in property <bool> active;
+    callback clicked;
+    width: 150px;
+    border-radius: T.r;
+    background: active ? led.with-alpha(0.10) : ta.has-hover ? T.hover : transparent;
+    border-width: 1px;
+    border-color: active ? led.with-alpha(0.55) : transparent;
+    HorizontalLayout {
+        padding-left: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                border-radius: 3.5px;
+                background: active ? led : #2A2D35;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            Text {
+                text: title;
+                color: active ? T.text : T.text-2;
+                font-family: T.mono;
+                font-weight: 700;
+                font-size: 11px;
+                letter-spacing: 1.2px;
+            }
+            Text {
+                text: sub;
+                color: active ? led : T.text-3;
+                font-family: T.mono;
+                font-size: 9px;
+                letter-spacing: 0.6px;
+            }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Small segmented option (buffer size, sample rate, A/B).
+component Pick inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: t.preferred-width + 14px;
+    height: 24px;
+    border-radius: 3px;
+    background: active ? T.accent : ta.has-hover && enabled ? T.hover : transparent;
+    opacity: enabled ? 1 : 0.4;
+    t := Text {
+        text: root.text;
+        color: active ? T.accent-ink : T.text-2;
+        font-family: T.mono;
+        font-weight: 600;
+        font-size: 10.5px;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Recessed well grouping top-bar controls.
+component Well inherits Rectangle {
+    height: 36px;
+    border-radius: T.r;
+    background: T.well;
+    border-width: 1px;
+    border-color: T.line;
+}
+
+/// Peak meter with clip LED.
+component Meter inherits Rectangle {
+    in property <string> label;
+    in property <float> level; // 0..1 peak
+    in property <bool> clipped;
+    width: 54px;
+    height: 36px;
+    Text {
+        x: 0;
+        y: 3px;
+        text: root.label;
+        color: T.text-3;
+        font-family: T.mono;
+        font-size: 8.5px;
+        letter-spacing: 1px;
+    }
+    Rectangle {
+        x: parent.width - 6px;
+        y: 4px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: clipped ? T.led-red : #2A2D35;
+    }
+    Rectangle {
+        x: 0;
+        y: 20px;
+        width: parent.width;
+        height: 6px;
+        border-radius: 1px;
+        background: T.well;
+        border-width: 1px;
+        border-color: T.line;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            height: 4px;
+            width: (parent.width - 2px) * clamp(root.level, 0, 1);
+            background: root.level > 0.89 ? T.led-red : root.level > 0.7 ? T.led-yellow : T.accent;
+        }
+    }
+}
+
 // ---------------------------------------------------------------- window
 
 export component MainWindow inherits Window {
@@ -152,6 +281,28 @@ export component MainWindow inherits Window {
     in property <bool> has-selection;
     in property <[Essential]> essentials;
     in-out property <bool> sidebar-pinned: true;
+
+    // --- engine mode + studio utilities (fed by the audio engine; idle values until it runs)
+    in property <bool> hw-mode: true;
+    in property <string> audio-host: "ALSA";
+    in property <string> audio-device: "default";
+    in property <int> audio-buffer: 128;
+    in property <int> audio-rate: 48000;
+    in property <bool> audio-running;
+    in property <float> audio-latency;
+    in property <bool> di-on: true;
+    in property <int> dsp-voicing: -1;
+    in property <string> tuner-note: "—";
+    in property <float> tuner-cents;
+    in property <bool> tuner-active;
+    in property <float> in-level;
+    in property <float> out-level;
+    in property <bool> in-clip;
+    in property <bool> out-clip;
+    in property <bool> limiter;
+    in property <int> ab-slot;
+    in property <bool> ab-has-b;
+    in property <string> tag;
 
     // --- amp connection
     in property <bool> connected;
@@ -239,6 +390,15 @@ export component MainWindow inherits Window {
     callback backup-amp();
     callback import-path(string);
     callback import-windows();
+    callback mode-picked(bool);
+    callback audio-buffer-picked(int);
+    callback audio-rate-picked(int);
+    callback limiter-toggled(bool);
+    callback ab-picked(int);
+    callback di-toggled(bool);
+    callback transport();
+    callback dsp-voicing-picked(int);
+    callback tag-picked(string);
 
     public function open-popup() { enum-popup.show(); }
 
@@ -247,10 +407,11 @@ export component MainWindow inherits Window {
     property <bool> show-slot-picker;
 
     // pedalboard geometry: fixed pitch, the drop gap is pure arithmetic
+    property <length> board-w: 1000px;
+    property <length> inner: board-w - 2 * 64px;
+    // stompboxes are fixed-size bitmaps: a narrow window scrolls the chain instead of squeezing it
     property <length> pw: 92px;
     property <length> ph: 176px;
-    property <length> board-w: 1000px;
-    property <length> inner: board-w - 2 * 54px;
     property <length> ps: clamp((inner - pedals.length * pw) / Math.max(1, pedals.length), 8px, 26px);
     property <length> pitch: pw + ps;
     property <length> left: (board-w - pedals.length * pitch) / 2;
@@ -259,36 +420,151 @@ export component MainWindow inherits Window {
     property <int> gap: clamp(floor((drag-x - left + ps / 2) / pitch + 0.5), 0, pedals.length);
 
     VerticalLayout {
-        // ================================================= header
+        // ================================================= top utility bar
         Rectangle {
             height: 52px;
+            Rectangle { y: parent.height - 1px; height: 1px; background: T.line; }
             HorizontalLayout {
-                padding-left: 20px;
+                padding-left: 16px;
                 padding-right: 10px;
+                padding-top: 8px;
+                padding-bottom: 8px;
                 spacing: 10px;
-                // wordmark: app icon, name, what it drives
+                // wordmark
                 HorizontalLayout {
-                    spacing: 10px;
-                    VerticalLayout {
-                        alignment: center;
-                        Image {
-                            width: 26px;
-                            height: 26px;
-                            source: @image-url("art/icon.png");
+                    spacing: 6px;
+                    Text {
+                        text: "HAZE";
+                        color: T.text;
+                        font-family: T.mono;
+                        font-size: 15px;
+                        font-weight: 800;
+                        letter-spacing: 3px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "STUDIO";
+                        color: T.text-3;
+                        font-family: T.mono;
+                        font-size: 9px;
+                        letter-spacing: 2px;
+                        vertical-alignment: center;
+                    }
+                }
+                // dual-mode switch
+                Well {
+                    width: 2 * 150px + 8px;
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 2px;
+                        ModeSeg {
+                            title: "HARDWARE";
+                            sub: "KATANA USB-MIDI";
+                            led: T.amber;
+                            active: hw-mode;
+                            clicked => { mode-picked(true); }
+                        }
+                        ModeSeg {
+                            title: "STANDALONE";
+                            sub: "PC DSP ENGINE";
+                            led: T.cyan;
+                            active: !hw-mode;
+                            clicked => { mode-picked(false); }
                         }
                     }
-                    Text {
-                        text: "Haze";
-                        color: #f5efe9;
-                        font-size: 18px;
-                        font-weight: 700;
-                        vertical-alignment: center;
+                }
+                // hardware: Katana link
+                if hw-mode: Well {
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: connected ? 12px : 3px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Led { size: 7px; state: connected ? 1 : 0; }
+                        }
+                        Text {
+                            text: "KATANA MKII";
+                            color: connected ? T.text : T.text-2;
+                            font-family: T.mono;
+                            font-size: 11px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: conn-text;
+                            color: T.text-3;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                        if !connected: VerticalLayout {
+                            alignment: center;
+                            Pick {
+                                text: "POŁĄCZ";
+                                active: true;
+                                clicked => { connect(); }
+                            }
+                        }
                     }
-                    Text {
-                        text: "for BOSS Katana";
-                        color: T.text-3;
-                        font-size: 12px;
-                        vertical-alignment: center;
+                }
+                // standalone: audio device + latency
+                if !hw-mode: Well {
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 4px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Led { size: 7px; state: audio-running ? 1 : 0; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Pick {
+                                text: di-on ? "DI ▶" : "DI";
+                                active: di-on;
+                                clicked => { di-toggled(!di-on); }
+                            }
+                        }
+                        Text {
+                            text: audio-host + " · " + audio-device;
+                            color: T.text;
+                            font-family: T.mono;
+                            font-size: 10.5px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            max-width: 140px;
+                        }
+                        Rectangle { width: 1px; background: T.line; }
+                        HorizontalLayout {
+                            alignment: center;
+                            padding-top: 3px;
+                            padding-bottom: 3px;
+                            for b in [64, 128, 256]: Pick {
+                                text: b;
+                                active: b == audio-buffer;
+                                clicked => { audio-buffer-picked(b); }
+                            }
+                        }
+                        Rectangle { width: 1px; background: T.line; }
+                        HorizontalLayout {
+                            padding-top: 3px;
+                            padding-bottom: 3px;
+                            for r in [48000, 96000]: Pick {
+                                text: (r / 1000) + "k";
+                                active: r == audio-rate;
+                                clicked => { audio-rate-picked(r); }
+                            }
+                        }
+                        Rectangle { width: 1px; background: T.line; }
+                        // engine estimate when running (buffers + ring + IR partition), else 2 buffers;
+                        // converter latency of the interface comes on top
+                        Text {
+                            text: "RT " + round((audio-running ? audio-latency : 2000 * audio-buffer / audio-rate) * 10) / 10 + " ms";
+                            color: T.accent;
+                            font-family: T.mono;
+                            font-size: 10.5px;
+                            vertical-alignment: center;
+                        }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
@@ -296,76 +572,96 @@ export component MainWindow inherits Window {
                     text: busy-text;
                     color: T.text-2;
                     vertical-alignment: center;
-                    font-size: 12px;
+                    font-size: 11px;
                 }
                 if busy-text != "" && busy-progress >= 0: VerticalLayout {
                     alignment: center;
                     Rectangle {
-                        width: 110px;
-                        height: 3px;
-                        border-radius: 1.5px;
-                        background: #ffffff14;
+                        width: 90px;
+                        height: 2px;
+                        background: T.line;
                         Rectangle {
                             x: 0;
                             width: parent.width * root.busy-progress;
-                            border-radius: 1.5px;
-                            background: T.gold;
+                            background: T.accent;
                         }
                     }
                 }
-                // amp status: LED, model, port or state; "Połącz" when offline
-                VerticalLayout {
-                    alignment: center;
+                // chromatic tuner strip
+                Well {
+                    width: 128px;
+                    opacity: tuner-active ? 1 : 0.55;
+                    Text {
+                        x: 8px;
+                        width: 30px;
+                        text: tuner-note;
+                        color: tuner-active && abs(tuner-cents) < 3 ? T.led-green : T.text;
+                        font-family: T.mono;
+                        font-weight: 700;
+                        font-size: 14px;
+                        vertical-alignment: center;
+                    }
                     Rectangle {
-                        height: 34px;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: #ffffff10;
-                        background: #ffffff05;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            padding-right: connected ? 14px : 4px;
-                            spacing: 8px;
-                            VerticalLayout {
-                                alignment: center;
-                                LedImg {
-                                    width: 18px;
-                                    height: 18px;
-                                    state: connected ? 1 : 0;
-                                }
-                            }
-                            Text {
-                                text: "Katana MkII";
-                                color: connected ? T.text : T.text-2;
-                                font-size: 13px;
-                                font-weight: 600;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: conn-text;
-                                color: T.text-3;
-                                font-size: 12px;
-                                vertical-alignment: center;
-                            }
-                            if !connected: VerticalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: ctl.preferred-width + 20px;
-                                    height: 26px;
-                                    border-radius: 6px;
-                                    background: cta.has-hover ? #c9a55a30 : #c9a55a1c;
-                                    ctl := Text {
-                                        text: "Połącz";
-                                        color: T.gold-hi;
-                                        font-size: 12px;
-                                        font-weight: 600;
-                                    }
-                                    cta := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { connect(); }
-                                    }
-                                }
-                            }
+                        x: 42px;
+                        y: (parent.height - 14px) / 2;
+                        width: parent.width - 52px;
+                        height: 14px;
+                        for i in 9: Rectangle {
+                            x: i * (parent.width - 2px) / 8;
+                            y: i == 4 ? 0 : 4px;
+                            width: 2px;
+                            height: i == 4 ? 14px : 6px;
+                            background: i == 4 ? T.line-hi : T.line;
+                        }
+                        if tuner-active: Rectangle {
+                            x: (parent.width - 4px) * (clamp(tuner-cents, -50, 50) + 50) / 100;
+                            width: 4px;
+                            border-radius: 1px;
+                            background: abs(tuner-cents) < 3 ? T.led-green : T.accent;
+                        }
+                    }
+                }
+                Meter { label: "IN"; level: in-level; clipped: in-clip; }
+                Meter { label: "OUT"; level: out-level; clipped: out-clip; }
+                // master limiter (PC engine only)
+                Well {
+                    width: 46px;
+                    background: limiter && !hw-mode ? T.accent.with-alpha(0.14) : lta.has-hover && !hw-mode ? T.hover : T.well;
+                    border-color: limiter && !hw-mode ? T.accent-lo : T.line;
+                    opacity: hw-mode ? 0.4 : 1;
+                    Text {
+                        text: "LIM";
+                        color: limiter && !hw-mode ? T.accent-hi : T.text-2;
+                        font-family: T.mono;
+                        font-weight: 700;
+                        font-size: 10.5px;
+                        letter-spacing: 1px;
+                    }
+                    lta := TouchArea {
+                        enabled: !hw-mode;
+                        mouse-cursor: pointer;
+                        clicked => { limiter-toggled(!limiter); }
+                    }
+                }
+                // A/B snapshot compare
+                Well {
+                    width: 62px;
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 2px;
+                        Pick {
+                            text: "A";
+                            width: 26px;
+                            active: ab-slot == 0;
+                            enabled: has-selection;
+                            clicked => { ab-picked(0); }
+                        }
+                        Pick {
+                            text: ab-has-b ? "B" : "+B";
+                            width: 26px;
+                            active: ab-slot == 1;
+                            enabled: has-selection;
+                            clicked => { ab-picked(1); }
                         }
                     }
                 }
@@ -405,6 +701,7 @@ export component MainWindow inherits Window {
 
         HorizontalLayout {
             vertical-stretch: 1;
+            padding-top: 8px;
             padding-right: 8px;
             padding-bottom: 8px;
             spacing: 8px;
@@ -418,56 +715,47 @@ export component MainWindow inherits Window {
             spacing: 0px;
             // ============================================= stage
             stage := Rectangle {
-                vertical-stretch: 1;
-                border-radius: 12px;
-                background: @linear-gradient(180deg, #1d1915 0%, #16130f 55%, #0e0d0b 100%);
+                // content height of the upper deck: tone header, chain, compact amp core
+                property <length> deck-h: 488px;
+                vertical-stretch: insp-open ? 0 : 1;
+                min-height: deck-h;
+                max-height: insp-open ? deck-h : 100000px;
+                border-radius: 6px;
+                background: T.bg;
+                border-width: 1px;
+                border-color: T.line;
                 clip: true;
-                // key light over the amp + vignette (pre-rendered, dithered)
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    image-fit: fill;
-                    source: @image-url("art/stage-light.png");
-                }
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: @image-url("art/grain.png");
-                    horizontal-tiling: repeat;
-                    vertical-tiling: repeat;
-                }
 
                 if !has-selection: Text {
                     text: "Wybierz brzmienie z biblioteki";
                     color: T.text-3;
-                    font-family: T.display;
-                    font-size: 18px;
+                    font-family: T.mono;
+                    font-size: 13px;
+                    letter-spacing: 1px;
                 }
                 if has-selection: VerticalLayout {
-                    padding-left: 34px;
-                    padding-right: 34px;
-                    padding-top: insp-open ? 14px : 22px;
-                    padding-bottom: insp-open ? 14px : 20px;
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    padding-top: 14px;
+                    padding-bottom: 16px;
                     spacing: 0px;
-                    alignment: center;
 
                     // ---------- tone header
                     HorizontalLayout {
-                        height: 78px;
+                        height: 64px;
                         spacing: 8px;
                         VerticalLayout {
                             horizontal-stretch: 1;
                             alignment: center;
-                            spacing: 2px;
+                            spacing: 4px;
                             HorizontalLayout {
                                 spacing: 10px;
                                 TextInput {
                                     text: ed-name;
                                     color: T.text;
                                     font-family: T.display;
-                                    font-size: 34px;
+                                    font-size: 26px;
                                     font-weight: 700;
-                                    letter-spacing: 0.3px;
                                     single-line: true;
                                     accepted => {
                                         rename(self.text);
@@ -478,9 +766,9 @@ export component MainWindow inherits Window {
                                     width: 24px;
                                     Icon {
                                         d: Icons.star;
-                                        size: 20px;
+                                        size: 18px;
                                         filled: ed-fav;
-                                        tint: ed-fav ? T.gold : #5a5247;
+                                        tint: ed-fav ? T.accent : T.text-3;
                                     }
                                     TouchArea {
                                         mouse-cursor: pointer;
@@ -489,27 +777,27 @@ export component MainWindow inherits Window {
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                             }
-                            Rectangle { height: 4px; }
                             HorizontalLayout {
                                 spacing: 14px;
                                 Text {
                                     text: ed-amp-name;
                                     color: T.text-2;
-                                    font-size: 13px;
-                                    font-weight: 600;
+                                    font-family: T.mono;
+                                    font-size: 11px;
                                     vertical-alignment: center;
                                 }
                                 Text {
-                                    text: "efekty " + ed-fx-on + "/" + ed-fx-all;
+                                    text: "FX " + ed-fx-on + "/" + ed-fx-all;
                                     color: T.text-3;
-                                    font-size: 13px;
+                                    font-family: T.mono;
+                                    font-size: 11px;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     horizontal-stretch: 1;
                                     text: ed-origin;
                                     color: T.text-3;
-                                    font-size: 13px;
+                                    font-size: 11px;
                                     overflow: elide;
                                     vertical-alignment: center;
                                 }
@@ -531,10 +819,11 @@ export component MainWindow inherits Window {
                                 }
                             }
                         }
-                        if connected: VerticalLayout {
+                        if connected && hw-mode: VerticalLayout {
                             alignment: center;
                             Btn {
                                 primary: true;
+                                compact: true;
                                 text: ed-live ? "Gra na wzmacniaczu" : "Zagraj na wzmacniaczu";
                                 clicked => { audition(); }
                             }
@@ -583,43 +872,26 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    Rectangle { vertical-stretch: 1; min-height: 8px; max-height: 40px; }
+                    Rectangle { height: 12px; }
 
-                    // ---------- amp head
+                    // ---------- signal chain caption
                     HorizontalLayout {
-                        alignment: center;
-                        AmpHead {
-                            width: Math.min(1180px, stage.width - 68px);
-                            knobs: knobs;
-                            family: ed-amp-family;
-                            variation: ed-amp-var;
-                            amp-name: ed-amp-name;
-                            live: ed-live;
-                            connected: connected;
-                            compact: insp-open;
-                            knob-changed(i, v) => { knob-changed(i, v); }
-                            family-picked(f) => { amp-family(f); }
-                            variation-toggled(v) => { amp-variation(v); }
-                        }
-                    }
-
-                    Rectangle { vertical-stretch: 1; min-height: 14px; max-height: 46px; }
-
-                    // ---------- caption
-                    HorizontalLayout {
-                        height: 26px;
+                        height: 22px;
                         spacing: 10px;
                         Text {
-                            text: "Pedalboard";
+                            text: "SIGNAL CHAIN";
                             color: T.text-2;
-                            font-weight: 600;
-                            font-size: 13px;
+                            font-family: T.mono;
+                            font-weight: 700;
+                            font-size: 10.5px;
+                            letter-spacing: 1.5px;
                             vertical-alignment: center;
                         }
                         Text {
                             text: ed-chain-name;
                             color: T.text-3;
-                            font-size: 13px;
+                            font-family: T.mono;
+                            font-size: 10.5px;
                             vertical-alignment: center;
                         }
                         Text {
@@ -627,73 +899,62 @@ export component MainWindow inherits Window {
                             horizontal-alignment: right;
                             vertical-alignment: center;
                             font-size: 11px;
-                            text: drag-from >= 0 ? (drop-ok[gap] ? "puść, aby przestawić" : "tej kolejności Katana nie obsługuje") : "";
-                            color: drop-ok[gap] ? T.led-green : T.led-red;
+                            text: drag-from >= 0 ? (drop-ok[gap] ? "puść, aby przestawić" : "tej kolejności Katana nie obsługuje") : "przeciągnij blok, aby zmienić kolejność";
+                            color: drag-from < 0 ? T.text-3 : drop-ok[gap] ? T.led-green : T.led-red;
                         }
                     }
-                    Rectangle { height: 8px; }
+                    Rectangle { height: 6px; }
 
-                    // ---------- pedalboard
+                    // ---------- signal chain
+                    deck := Rectangle {
+                        height: ph + 32px;
+                        border-radius: 6px;
+                        background: T.well;
+                        border-width: 1px;
+                        border-color: T.line;
+                        clip: true;
+                        Flickable {
+                        content-width: Math.max(self.width, 128px + pedals.length * (pw + 10px));
+                        interactive: drag-from < 0;
                     board := Rectangle {
-                        height: ph + 64px;
-                        border-radius: 12px;
-                        background: @linear-gradient(180deg, #6b6b6e 0%, #3a3a3d 8%, #2a2a2c 92%, #121213 100%);
-                        drop-shadow-blur: 30px;
-                        drop-shadow-offset-y: 16px;
-                        drop-shadow-color: #000000c0;
+                        x: 0;
+                        y: 0;
+                        width: parent.content-width;
+                        height: parent.height;
                         init => { root.board-w = self.width; }
                         changed width => { root.board-w = self.width; }
                         property <length> py: (self.height - ph) / 2 + 4px;
-                        // velcro deck inside the aluminium frame
-                        Rectangle {
-                            x: 10px;
-                            y: 10px;
-                            width: parent.width - 20px;
-                            height: parent.height - 20px;
-                            border-radius: 6px;
-                            clip: true;
-                            Image {
-                                width: parent.width;
-                                height: parent.height;
-                                source: @image-url("art/board.png");
-                                horizontal-tiling: repeat;
-                                vertical-tiling: repeat;
-                            }
-                            Rectangle { background: @linear-gradient(180deg, #000000a0 0%, #00000000 18%, #00000000 85%, #00000060 100%); }
-                        }
-                        // IN / OUT jacks on the frame, with cables to the first / last pedal
-                        if pedals.length > 0: Cable {
-                            x: 30px;
-                            y: board.py + 30px;
-                            width: left + ps / 2 - 30px + 4px;
+                        // cables run at the pedals' jack height
+                        property <length> wy: py + 33px;
+                        ChainNode {
+                            x: 12px;
+                            y: board.wy - 19px;
+                            text: "IN";
                             hot: ed-live;
                         }
-                        if pedals.length > 0: Cable {
-                            x: left + ps / 2 + (pedals.length - 1) * pitch + pw - 4px;
-                            y: board.py + 30px;
-                            width: board.width - 30px - self.x;
+                        ChainNode {
+                            x: board.width - 52px;
+                            y: board.wy - 19px;
+                            text: "OUT";
                             hot: ed-live;
                         }
-                        for c[i] in Math.max(0, pedals.length - 1): Cable {
-                            x: left + ps / 2 + i * pitch + pw - 4px;
-                            y: board.py + 30px;
-                            width: ps + 8px;
+                        if pedals.length > 0: Wire {
+                            x: 52px;
+                            y: board.wy;
+                            width: left + ps / 2 - 52px;
                             hot: ed-live;
                         }
-                        for j in 2: Jack {
-                            x: j == 0 ? 8px : board.width - 34px;
-                            y: board.py + 21px;
+                        if pedals.length > 0: Wire {
+                            x: left + ps / 2 + (pedals.length - 1) * pitch + pw;
+                            y: board.wy;
+                            width: board.width - 52px - self.x;
+                            hot: ed-live;
                         }
-                        for j in 2: Text {
-                            x: j == 0 ? 10px : board.width - 32px;
-                            y: board.py + 50px;
-                            width: 22px;
-                            horizontal-alignment: center;
-                            text: j == 0 ? "IN" : "OUT";
-                            color: #ffffff50;
-                            font-family: T.display;
-                            font-weight: 700;
-                            font-size: 9px;
+                        for c[i] in Math.max(0, pedals.length - 1): Wire {
+                            x: left + ps / 2 + i * pitch + pw;
+                            y: board.wy;
+                            width: ps;
+                            hot: ed-live;
                         }
                         for p[i] in pedals: PedalView {
                             x: left + ps / 2 + i * pitch;
@@ -718,11 +979,10 @@ export component MainWindow inherits Window {
                         }
                         if drag-from >= 0: Rectangle {
                             for ok[g] in drop-ok: Rectangle {
-                                x: left + g * pitch - 2px;
+                                x: left + g * pitch - 1px;
                                 y: board.py - 4px;
-                                width: 4px;
+                                width: 2px;
                                 height: ph + 8px;
-                                border-radius: 2px;
                                 background: ok ? (g == gap ? T.led-green : T.led-green.with-alpha(0.25)) : (g == gap ? T.led-red : transparent);
                             }
                         }
@@ -734,27 +994,41 @@ export component MainWindow inherits Window {
                             lifted: true;
                         }
                     }
-                }
+                        }
+                    }
 
-                // inset-window edge
-                Rectangle {
-                    border-radius: 12px;
-                    border-width: 1px;
-                    border-color: #ffffff0f;
-                }
+                    Rectangle { height: 12px; }
 
+                    // ---------- amp core
+                    AmpCore {
+                        knobs: knobs;
+                        dsp-voicing: dsp-voicing;
+                        dsp-voicing-picked(v) => { dsp-voicing-picked(v); }
+                        family: ed-amp-family;
+                        variation: ed-amp-var;
+                        amp-name: ed-amp-name;
+                        live: ed-live;
+                        connected: connected;
+                        compact: insp-open;
+                        knob-changed(i, v) => { knob-changed(i, v); }
+                        family-picked(f) => { amp-family(f); }
+                        variation-toggled(v) => { amp-variation(v); }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
             }
 
             // ---------- effect editor: docked under the stage, nothing gets covered
             dock := Rectangle {
-                height: insp-open ? 316px : 0px;
-                animate height { duration: 180ms; easing: ease-out; }
+                vertical-stretch: insp-open ? 1 : 0;
+                min-height: insp-open ? 316px : 0px;
+                max-height: insp-open ? 100000px : 0px;
                 clip: true;
                 Inspector {
                     x: 0;
                     y: 8px;
                     width: parent.width;
-                    height: 308px;
+                    height: parent.height - 8px;
                     title: insp-title;
                     subtitle: insp-subtitle;
                     hue: insp-hue;
@@ -795,11 +1069,27 @@ export component MainWindow inherits Window {
 
     }
 
+    // Spacebar: DI player transport (standalone). Text fields keep their own spaces.
+    keys := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if e.text == " " {
+                transport();
+                return accept;
+            }
+            reject
+        }
+    }
+
     // ================================================= library sidebar (over the stage, under dialogs)
     side := LibrarySidebar {
         x: 0;
-        y: 52px;
-        height: root.height - 52px;
+        y: 53px;
+        height: root.height - 53px;
         nav: nav;
         nav-selected: nav-selected;
         nav-title: nav-title;
@@ -807,6 +1097,8 @@ export component MainWindow inherits Window {
         selected-index: selected-index;
         essentials: essentials;
         connected: connected;
+        tag: tag;
+        tag-picked(t) => { tag-picked(t); }
         pinned <=> root.sidebar-pinned;
         search(q) => { search(q); }
         nav-clicked(id) => { nav-clicked(id); }
@@ -828,7 +1120,7 @@ export component MainWindow inherits Window {
                 spacing: 4px;
                 Label {
                     text: popup-title;
-                    color: T.gold;
+                    color: T.accent;
                     height: 24px;
                 }
                 ListView {
@@ -882,11 +1174,11 @@ export component MainWindow inherits Window {
                 border-radius: 8px;
                 background: pta.has-hover ? T.hover : #ffffff08;
                 border-width: 1px;
-                border-color: pta.has-hover ? T.gold : transparent;
+                border-color: pta.has-hover ? T.accent : transparent;
                 VerticalLayout {
                     padding: 9px;
                     padding-left: 12px;
-                    Text { text: sl.label; color: T.gold; font-family: T.display; font-weight: 700; font-size: 11px; }
+                    Text { text: sl.label; color: T.accent; font-family: T.display; font-weight: 700; font-size: 11px; }
                     Text { text: sl.name; color: T.text-2; font-size: 12px; overflow: elide; }
                 }
                 pta := TouchArea {
@@ -986,7 +1278,7 @@ export component MainWindow inherits Window {
                         border-radius: T.r;
                         background: T.bg;
                         border-width: 1px;
-                        border-color: path-in.has-focus ? T.gold-lo : T.line;
+                        border-color: path-in.has-focus ? T.accent-lo : T.line;
                         path-in := TextInput {
                             x: 10px;
                             width: parent.width - 20px;
