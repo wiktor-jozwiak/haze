@@ -122,7 +122,7 @@ impl Actor {
 
     fn handle(&mut self, c: Cmd) -> Result<(), String> {
         if !matches!(c, Cmd::Connect | Cmd::Hotplug) && self.conn.is_none() {
-            return Err("Wzmacniacz niepodłączony".into());
+            return Err("Amp not connected".into());
         }
         match c {
             Cmd::Connect => self.connect(false),
@@ -179,21 +179,21 @@ impl Actor {
                 }
                 let base = sysex::user_patch(slot);
                 let msgs = patch.dt1_messages(self.dev(), base, true);
-                self.send_bulk(&msgs, Some(format!("Zapis do {}", sysex::SLOT_LABELS[slot as usize])))?;
+                self.send_bulk(&msgs, Some(format!("Writing {}", sysex::SLOT_LABELS[slot as usize])))?;
                 let back = self.read_patch(base, None)?;
                 let verified = back == *patch;
                 (self.emit)(Event::Written { slot, verified });
                 self.read_names()
             }
             Cmd::ReadSlot(slot) => {
-                let p = self.read_patch(sysex::user_patch(slot), Some(format!("Odczyt {}", sysex::SLOT_LABELS[slot as usize])))?;
+                let p = self.read_patch(sysex::user_patch(slot), Some(format!("Reading {}", sysex::SLOT_LABELS[slot as usize])))?;
                 (self.emit)(Event::SlotPatch(slot, Box::new(p)));
                 Ok(())
             }
             Cmd::ReadAllSlots => {
                 let mut all = vec![];
                 for s in 0..SLOT_COUNT {
-                    all.push(self.read_patch(sysex::user_patch(s), Some(format!("Kopia kanału {}", sysex::SLOT_LABELS[s as usize])))?);
+                    all.push(self.read_patch(sysex::user_patch(s), Some(format!("Backing up {}", sysex::SLOT_LABELS[s as usize])))?);
                 }
                 (self.emit)(Event::AllSlots(all));
                 Ok(())
@@ -218,11 +218,11 @@ impl Actor {
     }
 
     fn raw_send(&mut self, m: &[u8]) -> Result<(), String> {
-        let Some(c) = self.conn.as_mut() else { return Err("Wzmacniacz niepodłączony".into()) };
+        let Some(c) = self.conn.as_mut() else { return Err("Amp not connected".into()) };
         if let Err(e) = c.out.send(m) {
             self.conn = None;
             (self.emit)(Event::Disconnected(e.to_string()));
-            return Err(format!("Utracono połączenie: {e}"));
+            return Err(format!("Connection lost: {e}"));
         }
         Ok(())
     }
@@ -272,7 +272,7 @@ impl Actor {
                 let d = sysex::parse_dt1(m)?;
                 (d.addr >= addr && d.addr < addr + size).then_some(d)
             });
-            let Some(d) = chunk else { return Err(format!("Brak odpowiedzi wzmacniacza ({:08X})", addr)) };
+            let Some(d) = chunk else { return Err(format!("No reply from the amp ({:08X})", addr)) };
             let off = (d.addr - addr) as usize;
             let n = d.data.len().min(buf.len() - off);
             buf[off..off + n].copy_from_slice(&d.data[..n]);
@@ -315,7 +315,7 @@ impl Actor {
         let out_port = out.ports().into_iter().find(|p| out.port_name(p).map(pick).unwrap_or(false));
         let (Some(ip), Some(op)) = (in_port, out_port) else {
             if !quiet {
-                (self.emit)(Event::Disconnected("Nie znaleziono KATANY na USB".into()));
+                (self.emit)(Event::Disconnected("No Katana found on USB".into()));
             }
             return Ok(());
         };
@@ -331,7 +331,7 @@ impl Actor {
         self.raw_send(&sysex::IDENTITY_REQUEST)?;
         let Some(dev) = self.wait_midi(Duration::from_millis(1500), sysex::parse_identity) else {
             self.conn = None;
-            (self.emit)(Event::Disconnected("KATANA nie odpowiada na Identity Request".into()));
+            (self.emit)(Event::Disconnected("Katana does not answer the Identity Request".into()));
             return Ok(());
         };
         if let Some(c) = self.conn.as_mut() {
