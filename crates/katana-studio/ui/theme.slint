@@ -1,0 +1,49 @@
+import "fonts/RobotoCondensed-Bold.ttf";
+import "fonts/RobotoCondensed-Regular.ttf";
+import "fonts/RobotoCondensed-Light.ttf";
+
+export global T {
+    // surfaces: warm near-black, like tolex under stage light
+    out property <color> bg: #0c0b0a;
+    out property <color> bg-side: #11100e;
+    // window chrome: header, sidebar and the bottom bar share one surface around the stage
+    out property <color> chrome: #0f0e0c;
+    out property <color> panel: #171512;
+    out property <color> panel-hi: #1e1b17;
+    out property <color> hover: #24201b;
+    out property <color> line: #2b2620;
+    out property <color> line-hi: #3a332a;
+    // brass / gold piping
+    out property <color> gold: #c9a55a;
+    out property <color> gold-hi: #e6c77f;
+    out property <color> gold-lo: #6e5a32;
+    out property <color> gold-ink: #17130b;
+    // text
+    out property <color> text: #efe7d8;
+    out property <color> text-2: #b6ad9e;
+    out property <color> text-3: #847b6e;
+    // KATANA panel LEDs
+    out property <color> led-green: #46d97a;
+    out property <color> led-red: #ff554a;
+    out property <color> led-yellow: #ffc23a;
+    out property <color> danger: #e5533d;
+
+    out property <string> display: "Roboto Condensed";
+    out property <length> r: 6px;
+
+    /// enclosure colour of BOOSTER, MOD, FX, DELAY, REVERB (summary LED order)
+    public pure function fx(i: int) -> color {
+        if i == 0 { return #d8742a; }
+        if i == 1 { return #3f82e0; }
+        if i == 2 { return #9560e0; }
+        if i == 3 { return #2fb07f; }
+        return #36b2c9;
+    }
+
+    public pure function led(state: int) -> color {
+        if state == 1 { return led-green; }
+        if state == 2 { return led-red; }
+        if state == 3 { return led-yellow; }
+        return #2c2823;
+    }
+}

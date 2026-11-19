@@ -1,0 +1,8 @@
+[package]
+name="katana-midi"
+version.workspace=true
+edition.workspace=true
+[dependencies]
+katana-core={path="../katana-core"}
+midir="0.10"
+libc="0.2"

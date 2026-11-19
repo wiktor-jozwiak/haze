@@ -1,0 +1,20 @@
+[package]
+name = "katana-studio"
+description = "Haze: tone librarian & editor for BOSS KATANA MkII on Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "haze"
+path = "src/main.rs"
+
+[dependencies]
+katana-core = { path = "../katana-core" }
+katana-midi = { path = "../katana-midi" }
+libc = "0.2"
+# CPU software renderer only: no GL/Vulkan context, partial redraws, small RSS.
+slint = { version = "1.19", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
+
+[build-dependencies]
+slint-build = "1.19"

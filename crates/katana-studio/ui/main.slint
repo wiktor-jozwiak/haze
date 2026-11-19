@@ -1,0 +1,1030 @@
+import { ListView } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { Label, Btn, Led, Toggle, SearchField, Icon, Icons } from "widgets.slint";
+import { AmpHead, PedalView, Pedal, MiniKnob, KnobVal, Cable, Jack, LedImg } from "rig.slint";
+import { LibrarySidebar, ToneRow, NavItem, Essential, SidebarMetrics } from "sidebar.slint";
+import { Inspector, ParamRow } from "inspector.slint";
+
+export { Pedal, MiniKnob, KnobVal, ToneRow, NavItem, Essential, ParamRow }
+
+export struct Slot {
+    label: string,
+    name: string,
+    current: bool,
+}
+
+export struct Opt {
+    value: int,
+    label: string,
+}
+
+// ---------------------------------------------------------------- small parts
+
+component IconBtn inherits Rectangle {
+    in property <string> icon;
+    in property <bool> filled;
+    in property <bool> active;
+    callback clicked;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: active ? T.hover : ta.has-hover ? T.panel-hi : transparent;
+    Icon {
+        d: icon;
+        filled: root.filled;
+        size: 20px;
+        tint: ta.has-hover || active ? T.text : T.text-2;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component MenuItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 36px;
+    border-radius: 6px;
+    background: ta.has-hover && enabled ? T.hover : transparent;
+    Text {
+        x: 14px;
+        text: root.text;
+        color: !enabled ? T.text-3 : danger ? T.danger : T.text;
+        vertical-alignment: center;
+        height: parent.height;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Menu inherits Rectangle {
+    background: #1b1915;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #ffffff14;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 10px;
+    drop-shadow-color: #000000c0;
+    @children
+}
+
+component SlotChip inherits Rectangle {
+    in property <Slot> slot;
+    callback clicked;
+    callback pull;
+    callback push;
+    height: 40px;
+    border-radius: 8px;
+    background: slot.current ? #2a2419 : ta.has-hover ? #1c1a16 : transparent;
+    border-width: slot.current ? 1px : 0;
+    border-color: T.gold-lo;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text {
+            text: slot.label;
+            color: slot.current ? T.gold-hi : T.text-3;
+            font-family: T.display;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 1px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: slot.name;
+            color: slot.current ? T.text : T.text-2;
+            font-family: T.display;
+            font-weight: 700;
+            font-size: 13px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if ta.has-hover: Rectangle {
+            width: 16px;
+            Icon { d: Icons.pull; size: 16px; tint: pa.has-hover ? T.text : T.text-3; y: (parent.height - 16px) / 2; }
+            pa := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.pull(); }
+            }
+        }
+        if ta.has-hover && slot.label != "PANEL": Rectangle {
+            width: 16px;
+            Icon { d: Icons.push; size: 16px; tint: wa.has-hover ? T.text : T.text-3; y: (parent.height - 16px) / 2; }
+            wa := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.push(); }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- window
+
+export component MainWindow inherits Window {
+    title: "Haze";
+    icon: @image-url("art/icon.png");
+    preferred-width: 1680px;
+    preferred-height: 1000px;
+    min-width: 1280px;
+    min-height: 780px;
+    background: T.chrome;
+    default-font-family: "Adwaita Sans";
+    default-font-size: 13px;
+
+    // --- library
+    in property <[NavItem]> nav;
+    in property <string> nav-selected;
+    in property <string> nav-title;
+    in property <[ToneRow]> tones;
+    in property <int> selected-index: -1;
+    in property <bool> has-selection;
+    in property <[Essential]> essentials;
+    in-out property <bool> sidebar-pinned: true;
+
+    // --- amp connection
+    in property <bool> connected;
+    in property <string> conn-text: "szukam…";
+    in property <[Slot]> slots;
+    in property <string> busy-text;
+    in property <float> busy-progress: -1;
+    in property <string> toast;
+    in property <bool> toast-error;
+
+    // --- rig
+    in property <string> ed-name;
+    in property <string> ed-origin;
+    in property <bool> ed-fav;
+    in property <bool> ed-dirty;
+    in property <bool> ed-live;
+    in property <string> ed-amp-name;
+    in property <int> ed-amp-family: -1;
+    in property <bool> ed-amp-var;
+    in property <string> ed-chain-name;
+    in property <int> ed-fx-on;
+    in property <int> ed-fx-all;
+    in property <[KnobVal]> knobs;
+    in property <[Pedal]> pedals;
+    in property <int> pedal-selected: -1;
+    in property <[bool]> drop-ok;
+
+    // --- inspector
+    in property <bool> insp-open;
+    in property <string> insp-title;
+    in property <string> insp-subtitle;
+    in property <color> insp-hue;
+    in property <color> insp-ink;
+    in property <bool> insp-has-sw;
+    in property <bool> insp-on;
+    in property <int> insp-variant: -1;
+    in property <[Opt]> insp-types;
+    in property <int> insp-type;
+    in property <[string]> insp-sections;
+    in property <int> insp-section;
+    in property <[ParamRow]> insp-params;
+    in property <float> insp-params-h;
+
+    in property <[Opt]> popup-options;
+    in property <string> popup-title;
+    in property <string> import-hint;
+
+    // --- callbacks
+    callback search(string);
+    callback nav-clicked(string);
+    callback tone-clicked(int);
+    callback tone-activated(int);
+    callback tone-fav(int);
+    callback essential-clicked(string);
+    callback knob-changed(int, int);
+    callback amp-family(int);
+    callback amp-variation(bool);
+    callback pedal-clicked(int);
+    callback pedal-toggled(int);
+    callback pedal-knob(int, int, int);
+    callback pedal-drag-start(int);
+    callback pedal-dropped(int, int);
+    callback insp-close();
+    callback insp-toggle(bool);
+    callback insp-variant-picked(int);
+    callback insp-type-picked(int);
+    callback insp-type-request();
+    callback insp-section-picked(int);
+    callback insp-param(int, int);
+    callback insp-enum-request(int);
+    callback popup-picked(int);
+    callback rename(string);
+    callback toggle-fav();
+    callback audition();
+    callback save();
+    callback save-copy();
+    callback revert();
+    callback delete-tone();
+    callback export-tone();
+    callback export-list();
+    callback write-slot(int);
+    callback connect();
+    callback select-slot(int);
+    callback pull-slot(int);
+    callback backup-amp();
+    callback import-path(string);
+    callback import-windows();
+
+    public function open-popup() { enum-popup.show(); }
+
+    property <int> confirm-slot: -1;
+    property <bool> show-import;
+    property <bool> show-slot-picker;
+
+    // pedalboard geometry: fixed pitch, the drop gap is pure arithmetic
+    property <length> pw: 92px;
+    property <length> ph: 176px;
+    property <length> board-w: 1000px;
+    property <length> inner: board-w - 2 * 54px;
+    property <length> ps: clamp((inner - pedals.length * pw) / Math.max(1, pedals.length), 8px, 26px);
+    property <length> pitch: pw + ps;
+    property <length> left: (board-w - pedals.length * pitch) / 2;
+    property <int> drag-from: -1;
+    property <length> drag-x;
+    property <int> gap: clamp(floor((drag-x - left + ps / 2) / pitch + 0.5), 0, pedals.length);
+
+    VerticalLayout {
+        // ================================================= header
+        Rectangle {
+            height: 52px;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 10px;
+                spacing: 10px;
+                // wordmark: app icon, name, what it drives
+                HorizontalLayout {
+                    spacing: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 26px;
+                            height: 26px;
+                            source: @image-url("art/icon.png");
+                        }
+                    }
+                    Text {
+                        text: "Haze";
+                        color: #f5efe9;
+                        font-size: 18px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "for BOSS Katana";
+                        color: T.text-3;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if busy-text != "": Text {
+                    text: busy-text;
+                    color: T.text-2;
+                    vertical-alignment: center;
+                    font-size: 12px;
+                }
+                if busy-text != "" && busy-progress >= 0: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 110px;
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: #ffffff14;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * root.busy-progress;
+                            border-radius: 1.5px;
+                            background: T.gold;
+                        }
+                    }
+                }
+                // amp status: LED, model, port or state; "Połącz" when offline
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #ffffff10;
+                        background: #ffffff05;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: connected ? 14px : 4px;
+                            spacing: 8px;
+                            VerticalLayout {
+                                alignment: center;
+                                LedImg {
+                                    width: 18px;
+                                    height: 18px;
+                                    state: connected ? 1 : 0;
+                                }
+                            }
+                            Text {
+                                text: "Katana MkII";
+                                color: connected ? T.text : T.text-2;
+                                font-size: 13px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: conn-text;
+                                color: T.text-3;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                            if !connected: VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: ctl.preferred-width + 20px;
+                                    height: 26px;
+                                    border-radius: 6px;
+                                    background: cta.has-hover ? #c9a55a30 : #c9a55a1c;
+                                    ctl := Text {
+                                        text: "Połącz";
+                                        color: T.gold-hi;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                    }
+                                    cta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { connect(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    app-menu-btn := IconBtn {
+                        icon: Icons.menu;
+                        clicked => { app-menu.show(); }
+                    }
+                }
+            }
+            app-menu := PopupWindow {
+                x: parent.width - 250px;
+                y: 46px;
+                width: 236px;
+                height: 3 * 36px + 12px;
+                Menu {
+                    VerticalLayout {
+                        padding: 6px;
+                        MenuItem {
+                            text: "Importuj brzmienia…";
+                            clicked => { show-import = true; app-menu.close(); }
+                        }
+                        MenuItem {
+                            text: "Kopia wszystkich kanałów";
+                            enabled: connected;
+                            clicked => { backup-amp(); app-menu.close(); }
+                        }
+                        MenuItem {
+                            text: "Eksportuj kolekcję (.tsl)";
+                            clicked => { export-list(); app-menu.close(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding-right: 8px;
+            padding-bottom: 8px;
+            spacing: 8px;
+            // ============================================= library rail placeholder (sidebar overlays the stage)
+            Rectangle {
+                width: side.pinned ? SidebarMetrics.open : SidebarMetrics.rail;
+            }
+
+            VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 0px;
+            // ============================================= stage
+            stage := Rectangle {
+                vertical-stretch: 1;
+                border-radius: 12px;
+                background: @linear-gradient(180deg, #1d1915 0%, #16130f 55%, #0e0d0b 100%);
+                clip: true;
+                // key light over the amp + vignette (pre-rendered, dithered)
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: fill;
+                    source: @image-url("art/stage-light.png");
+                }
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("art/grain.png");
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                }
+
+                if !has-selection: Text {
+                    text: "Wybierz brzmienie z biblioteki";
+                    color: T.text-3;
+                    font-family: T.display;
+                    font-size: 18px;
+                }
+                if has-selection: VerticalLayout {
+                    padding-left: 34px;
+                    padding-right: 34px;
+                    padding-top: insp-open ? 14px : 22px;
+                    padding-bottom: insp-open ? 14px : 20px;
+                    spacing: 0px;
+                    alignment: center;
+
+                    // ---------- tone header
+                    HorizontalLayout {
+                        height: 78px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                TextInput {
+                                    text: ed-name;
+                                    color: T.text;
+                                    font-family: T.display;
+                                    font-size: 34px;
+                                    font-weight: 700;
+                                    letter-spacing: 0.3px;
+                                    single-line: true;
+                                    accepted => {
+                                        rename(self.text);
+                                        self.clear-focus();
+                                    }
+                                }
+                                Rectangle {
+                                    width: 24px;
+                                    Icon {
+                                        d: Icons.star;
+                                        size: 20px;
+                                        filled: ed-fav;
+                                        tint: ed-fav ? T.gold : #5a5247;
+                                    }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { toggle-fav(); }
+                                    }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+                            Rectangle { height: 4px; }
+                            HorizontalLayout {
+                                spacing: 14px;
+                                Text {
+                                    text: ed-amp-name;
+                                    color: T.text-2;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "efekty " + ed-fx-on + "/" + ed-fx-all;
+                                    color: T.text-3;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: ed-origin;
+                                    color: T.text-3;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        if ed-dirty: VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Btn {
+                                    compact: true;
+                                    text: "Cofnij";
+                                    clicked => { revert(); }
+                                }
+                                Btn {
+                                    compact: true;
+                                    text: "Zapisz";
+                                    clicked => { save(); }
+                                }
+                            }
+                        }
+                        if connected: VerticalLayout {
+                            alignment: center;
+                            Btn {
+                                primary: true;
+                                text: ed-live ? "Gra na wzmacniaczu" : "Zagraj na wzmacniaczu";
+                                clicked => { audition(); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            more-btn := IconBtn {
+                                icon: Icons.more;
+                                filled: true;
+                                clicked => { more-menu.show(); }
+                            }
+                        }
+                        more-menu := PopupWindow {
+                            x: parent.width - 236px;
+                            y: 54px;
+                            width: 236px;
+                            height: 5 * 36px + 12px;
+                            Menu {
+                                VerticalLayout {
+                                    padding: 6px;
+                                    MenuItem {
+                                        text: "Zapisz do kanału wzmacniacza…";
+                                        enabled: connected;
+                                        clicked => { show-slot-picker = true; more-menu.close(); }
+                                    }
+                                    MenuItem {
+                                        text: "Duplikuj";
+                                        clicked => { save-copy(); more-menu.close(); }
+                                    }
+                                    MenuItem {
+                                        text: "Eksportuj .tsl";
+                                        clicked => { export-tone(); more-menu.close(); }
+                                    }
+                                    MenuItem {
+                                        text: "Cofnij zmiany";
+                                        enabled: ed-dirty;
+                                        clicked => { revert(); more-menu.close(); }
+                                    }
+                                    MenuItem {
+                                        text: "Usuń (do kosza)";
+                                        danger: true;
+                                        clicked => { delete-tone(); more-menu.close(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; min-height: 8px; max-height: 40px; }
+
+                    // ---------- amp head
+                    HorizontalLayout {
+                        alignment: center;
+                        AmpHead {
+                            width: Math.min(1180px, stage.width - 68px);
+                            knobs: knobs;
+                            family: ed-amp-family;
+                            variation: ed-amp-var;
+                            amp-name: ed-amp-name;
+                            live: ed-live;
+                            connected: connected;
+                            compact: insp-open;
+                            knob-changed(i, v) => { knob-changed(i, v); }
+                            family-picked(f) => { amp-family(f); }
+                            variation-toggled(v) => { amp-variation(v); }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; min-height: 14px; max-height: 46px; }
+
+                    // ---------- caption
+                    HorizontalLayout {
+                        height: 26px;
+                        spacing: 10px;
+                        Text {
+                            text: "Pedalboard";
+                            color: T.text-2;
+                            font-weight: 600;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: ed-chain-name;
+                            color: T.text-3;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            font-size: 11px;
+                            text: drag-from >= 0 ? (drop-ok[gap] ? "puść, aby przestawić" : "tej kolejności Katana nie obsługuje") : "";
+                            color: drop-ok[gap] ? T.led-green : T.led-red;
+                        }
+                    }
+                    Rectangle { height: 8px; }
+
+                    // ---------- pedalboard
+                    board := Rectangle {
+                        height: ph + 64px;
+                        border-radius: 12px;
+                        background: @linear-gradient(180deg, #6b6b6e 0%, #3a3a3d 8%, #2a2a2c 92%, #121213 100%);
+                        drop-shadow-blur: 30px;
+                        drop-shadow-offset-y: 16px;
+                        drop-shadow-color: #000000c0;
+                        init => { root.board-w = self.width; }
+                        changed width => { root.board-w = self.width; }
+                        property <length> py: (self.height - ph) / 2 + 4px;
+                        // velcro deck inside the aluminium frame
+                        Rectangle {
+                            x: 10px;
+                            y: 10px;
+                            width: parent.width - 20px;
+                            height: parent.height - 20px;
+                            border-radius: 6px;
+                            clip: true;
+                            Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: @image-url("art/board.png");
+                                horizontal-tiling: repeat;
+                                vertical-tiling: repeat;
+                            }
+                            Rectangle { background: @linear-gradient(180deg, #000000a0 0%, #00000000 18%, #00000000 85%, #00000060 100%); }
+                        }
+                        // IN / OUT jacks on the frame, with cables to the first / last pedal
+                        if pedals.length > 0: Cable {
+                            x: 30px;
+                            y: board.py + 30px;
+                            width: left + ps / 2 - 30px + 4px;
+                            hot: ed-live;
+                        }
+                        if pedals.length > 0: Cable {
+                            x: left + ps / 2 + (pedals.length - 1) * pitch + pw - 4px;
+                            y: board.py + 30px;
+                            width: board.width - 30px - self.x;
+                            hot: ed-live;
+                        }
+                        for c[i] in Math.max(0, pedals.length - 1): Cable {
+                            x: left + ps / 2 + i * pitch + pw - 4px;
+                            y: board.py + 30px;
+                            width: ps + 8px;
+                            hot: ed-live;
+                        }
+                        for j in 2: Jack {
+                            x: j == 0 ? 8px : board.width - 34px;
+                            y: board.py + 21px;
+                        }
+                        for j in 2: Text {
+                            x: j == 0 ? 10px : board.width - 32px;
+                            y: board.py + 50px;
+                            width: 22px;
+                            horizontal-alignment: center;
+                            text: j == 0 ? "IN" : "OUT";
+                            color: #ffffff50;
+                            font-family: T.display;
+                            font-weight: 700;
+                            font-size: 9px;
+                        }
+                        for p[i] in pedals: PedalView {
+                            x: left + ps / 2 + i * pitch;
+                            y: board.py;
+                            width: pw;
+                            p: p;
+                            selected: i == pedal-selected && insp-open;
+                            ghost: i == drag-from;
+                            clicked => { pedal-clicked(i); }
+                            toggled => { pedal-toggled(i); }
+                            knob(k, v) => { pedal-knob(i, k, v); }
+                            drag-start => {
+                                drag-from = i;
+                                drag-x = self.x + pw / 2;
+                                pedal-drag-start(i);
+                            }
+                            drag-move(mx) => { drag-x = self.x + mx; }
+                            dropped => {
+                                pedal-dropped(drag-from, gap);
+                                drag-from = -1;
+                            }
+                        }
+                        if drag-from >= 0: Rectangle {
+                            for ok[g] in drop-ok: Rectangle {
+                                x: left + g * pitch - 2px;
+                                y: board.py - 4px;
+                                width: 4px;
+                                height: ph + 8px;
+                                border-radius: 2px;
+                                background: ok ? (g == gap ? T.led-green : T.led-green.with-alpha(0.25)) : (g == gap ? T.led-red : transparent);
+                            }
+                        }
+                        if drag-from >= 0: PedalView {
+                            x: drag-x - pw / 2;
+                            y: board.py;
+                            width: pw;
+                            p: pedals[drag-from];
+                            lifted: true;
+                        }
+                    }
+                }
+
+                // inset-window edge
+                Rectangle {
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: #ffffff0f;
+                }
+
+            }
+
+            // ---------- effect editor: docked under the stage, nothing gets covered
+            dock := Rectangle {
+                height: insp-open ? 316px : 0px;
+                animate height { duration: 180ms; easing: ease-out; }
+                clip: true;
+                Inspector {
+                    x: 0;
+                    y: 8px;
+                    width: parent.width;
+                    height: 308px;
+                    title: insp-title;
+                    subtitle: insp-subtitle;
+                    hue: insp-hue;
+                    ink: insp-ink;
+                    has-sw: insp-has-sw;
+                    on: insp-on;
+                    variant: insp-variant;
+                    has-types: insp-types.length > 0;
+                    sections: insp-sections;
+                    section: insp-section;
+                    params: insp-params;
+                    params-h: insp-params-h;
+                    close => { insp-close(); }
+                    toggle(v) => { insp-toggle(v); }
+                    variant-picked(i) => { insp-variant-picked(i); }
+                    type-request => { insp-type-request(); }
+                    section-picked(i) => { insp-section-picked(i); }
+                    param(i, v) => { insp-param(i, v); }
+                    enum-request(i) => { insp-enum-request(i); }
+                }
+            }
+
+            // ---------- amp channels, under the stage (only when an amp is there)
+            if connected: HorizontalLayout {
+                height: 48px;
+                padding-top: 8px;
+                spacing: 4px;
+                for sl[i] in slots: SlotChip {
+                    horizontal-stretch: 1;
+                    slot: sl;
+                    clicked => { select-slot(i); }
+                    pull => { pull-slot(i); }
+                    push => { if has-selection { confirm-slot = i; } }
+                }
+            }
+            }
+        }
+
+    }
+
+    // ================================================= library sidebar (over the stage, under dialogs)
+    side := LibrarySidebar {
+        x: 0;
+        y: 52px;
+        height: root.height - 52px;
+        nav: nav;
+        nav-selected: nav-selected;
+        nav-title: nav-title;
+        tones: tones;
+        selected-index: selected-index;
+        essentials: essentials;
+        connected: connected;
+        pinned <=> root.sidebar-pinned;
+        search(q) => { search(q); }
+        nav-clicked(id) => { nav-clicked(id); }
+        tone-clicked(i) => { tone-clicked(i); }
+        tone-activated(i) => { tone-activated(i); }
+        tone-fav(i) => { tone-fav(i); }
+        essential-clicked(id) => { essential-clicked(id); }
+    }
+
+    // ================================================= overlays
+    enum-popup := PopupWindow {
+        x: root.width - 410px;
+        y: 200px;
+        width: 360px;
+        height: Math.min(root.height - 260px, 50px + popup-options.length * 32px);
+        Menu {
+            VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+                Label {
+                    text: popup-title;
+                    color: T.gold;
+                    height: 24px;
+                }
+                ListView {
+                    for o in popup-options: Rectangle {
+                        height: 32px;
+                        border-radius: 6px;
+                        background: ota.has-hover ? T.hover : transparent;
+                        Text {
+                            x: 10px;
+                            text: o.label;
+                            color: T.text;
+                            vertical-alignment: center;
+                        }
+                        ota := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                popup-picked(o.value);
+                                enum-popup.close();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if show-slot-picker: Rectangle {
+        background: #000000b0;
+        TouchArea {
+            clicked => { show-slot-picker = false; }
+        }
+        Menu {
+            width: 572px;
+            height: 236px;
+            TouchArea { }
+            Text {
+                x: 24px;
+                y: 22px;
+                text: "Zapisz „" + ed-name + "” do kanału";
+                font-family: T.display;
+                font-size: 22px;
+                font-weight: 700;
+                color: T.text;
+            }
+            for sl[i] in slots: Rectangle {
+                visible: i > 0;
+                x: 24px + mod(i - 1, 4) * 132px;
+                y: 72px + floor((i - 1) / 4) * 66px;
+                width: 124px;
+                height: 56px;
+                border-radius: 8px;
+                background: pta.has-hover ? T.hover : #ffffff08;
+                border-width: 1px;
+                border-color: pta.has-hover ? T.gold : transparent;
+                VerticalLayout {
+                    padding: 9px;
+                    padding-left: 12px;
+                    Text { text: sl.label; color: T.gold; font-family: T.display; font-weight: 700; font-size: 11px; }
+                    Text { text: sl.name; color: T.text-2; font-size: 12px; overflow: elide; }
+                }
+                pta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        show-slot-picker = false;
+                        confirm-slot = i;
+                    }
+                }
+            }
+        }
+    }
+
+    if confirm-slot >= 0: Rectangle {
+        background: #000000b0;
+        TouchArea {
+            clicked => { confirm-slot = -1; }
+        }
+        Menu {
+            width: 480px;
+            height: 210px;
+            TouchArea { }
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    text: "Nadpisać kanał " + slots[confirm-slot].label + "?";
+                    font-family: T.display;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: T.text;
+                }
+                Text {
+                    text: "„" + slots[confirm-slot].name + "” zostanie zastąpione przez „" + ed-name + "”. Obecna zawartość kanału trafi najpierw do biblioteki (Kopie wzmacniacza).";
+                    wrap: word-wrap;
+                    color: T.text-2;
+                    vertical-stretch: 1;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+                    Btn {
+                        text: "Anuluj";
+                        clicked => { confirm-slot = -1; }
+                    }
+                    Btn {
+                        primary: true;
+                        text: "Zapisz do " + slots[confirm-slot].label;
+                        clicked => {
+                            write-slot(confirm-slot);
+                            confirm-slot = -1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if show-import: Rectangle {
+        background: #000000b0;
+        TouchArea {
+            clicked => { show-import = false; }
+        }
+        Menu {
+            width: 620px;
+            height: 290px;
+            TouchArea { }
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text {
+                    text: "Import brzmień";
+                    font-family: T.display;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: T.text;
+                }
+                Text {
+                    text: import-hint;
+                    wrap: word-wrap;
+                    color: T.text-2;
+                }
+                Btn {
+                    primary: true;
+                    text: "Importuj z BOSS Tone Studio (Windows)";
+                    clicked => {
+                        import-windows();
+                        show-import = false;
+                    }
+                }
+                Label { text: "albo plik lub folder .tsl"; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 36px;
+                        border-radius: T.r;
+                        background: T.bg;
+                        border-width: 1px;
+                        border-color: path-in.has-focus ? T.gold-lo : T.line;
+                        path-in := TextInput {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            color: T.text;
+                            single-line: true;
+                            vertical-alignment: center;
+                            accepted => {
+                                import-path(self.text);
+                                show-import = false;
+                            }
+                        }
+                    }
+                    Btn {
+                        text: "Importuj";
+                        clicked => {
+                            import-path(path-in.text);
+                            show-import = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if toast != "": Rectangle {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - (connected ? 76px : 22px);
+        width: tt.preferred-width + 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: toast-error ? #3a1712 : #1f1c17;
+        border-width: 1px;
+        border-color: toast-error ? T.danger : #ffffff18;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: #000000a0;
+        tt := Text {
+            text: toast;
+            color: T.text;
+        }
+    }
+}

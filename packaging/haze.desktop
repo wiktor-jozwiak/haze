@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Haze
+GenericName=Tone editor
+Comment=Tone librarian and editor for BOSS Katana MkII
+Exec=haze
+Icon=haze
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=katana;boss;guitar;amp;tone;patch;tsl;
+StartupWMClass=haze

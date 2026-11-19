@@ -1,0 +1,725 @@
+// Amp head + pedalboard. All "physical" surfaces are pre-rendered bitmaps (crates/katana-art):
+// the CPU renderer only blits and clips them, no per-frame shading.
+import { T } from "theme.slint";
+
+export struct MiniKnob {
+    label: string,
+    value: int,
+    min: int,
+    max: int,
+    display: string,
+}
+
+export struct Pedal {
+    title: string,
+    type-name: string,
+    on: bool,
+    has-sw: bool,
+    led: int,
+    hue: color,
+    ink: color,
+    knobs: [MiniKnob],
+    movable: bool,
+    is-amp: bool,
+}
+
+export struct KnobVal {
+    label: string,
+    value: int,
+    min: int,
+    max: int,
+    reset: int,
+    display: string,
+}
+
+// ---------------------------------------------------------------- shared bits
+
+component Tip inherits Rectangle {
+    in property <string> text;
+    width: tt.preferred-width + 14px;
+    height: 20px;
+    border-radius: 4px;
+    background: #0d0c0bee;
+    border-width: 1px;
+    border-color: #ffffff1a;
+    tt := Text {
+        text: root.text;
+        color: #f4ecdc;
+        font-family: T.display;
+        font-weight: 700;
+        font-size: 11px;
+    }
+}
+
+export component LedImg inherits Image {
+    in property <int> state; // 0 off, 1 green, 2 red, 3 yellow
+    width: 22px;
+    height: 22px;
+    source: state == 1 ? @image-url("art/led-green.png") : state == 2 ? @image-url("art/led-red.png") : state == 3 ? @image-url("art/led-yellow.png") : @image-url("art/led-off.png");
+}
+
+/// Engraved separator on the brass panel.
+component Engrave inherits Rectangle {
+    width: 2px;
+    Rectangle { x: 0; width: 1px; background: #00000059; }
+    Rectangle { x: 1px; width: 1px; background: #ffffff38; }
+}
+
+// ---------------------------------------------------------------- amp head
+
+component HeadKnob inherits Rectangle {
+    in property <KnobVal> k;
+    callback changed(int);
+    property <float> t: (k.value - k.min) / Math.max(1, k.max - k.min);
+    property <int> start-v;
+    property <length> start-y;
+    width: 74px;
+    height: 96px;
+
+    Text {
+        y: 2px;
+        width: parent.width;
+        text: k.label;
+        horizontal-alignment: center;
+        color: #2a1d08;
+        font-family: T.display;
+        font-weight: 700;
+        font-size: 11px;
+        letter-spacing: 1.6px;
+    }
+    // printed scale ticks
+    for i in 11: Rectangle {
+        property <angle> a: (-135 + i * 27) * 1deg;
+        x: root.width / 2 + 35px * sin(a) - 1px;
+        y: 52px - 35px * cos(a) - 1px;
+        width: 2px;
+        height: 2px;
+        border-radius: 1px;
+        background: #2a1d08c0;
+    }
+    Image {
+        x: (parent.width - 60px) / 2;
+        y: 22px;
+        width: 60px;
+        height: 60px;
+        source: @image-url("art/knob-amp.png");
+        source-clip-x: 0;
+        source-clip-y: round(root.t * 63) * 60;
+        source-clip-width: 60;
+        source-clip-height: 60;
+    }
+    ta := TouchArea {
+        y: 18px;
+        height: 70px;
+        mouse-cursor: ns-resize;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.start-v = k.value;
+                root.start-y = self.mouse-y;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.changed(clamp(round(root.start-v + (root.start-y - self.mouse-y) / 160px * (k.max - k.min)), k.min, k.max));
+            }
+        }
+        double-clicked => { root.changed(k.reset); }
+        scroll-event(e) => {
+            root.changed(clamp(k.value + (e.delta-y > 0 ? 1 : -1), k.min, k.max));
+            accept
+        }
+    }
+    if ta.has-hover || ta.pressed: Tip {
+        x: (parent.width - self.width) / 2;
+        y: -14px;
+        text: k.display;
+    }
+}
+
+/// 5-position AMP TYPE rotary, like the real panel.
+component TypeSelector inherits Rectangle {
+    in property <int> family;
+    callback picked(int);
+    property <int> start-f;
+    property <length> start-y;
+    property <[int]> frames: [8, 20, 31, 43, 55];
+    width: 176px;
+    height: 100px;
+    for n[i] in ["ACOUSTIC", "CLEAN", "CRUNCH", "LEAD", "BROWN"]: Rectangle {
+        property <angle> a: (-100 + i * 50) * 1deg;
+        x: root.width / 2 + 60px * sin(a) - self.width / 2;
+        y: 64px - 50px * cos(a) - 6px;
+        width: 54px;
+        height: 12px;
+        Text {
+            text: n;
+            color: i == family ? #000000 : #2a1d08b0;
+            font-family: T.display;
+            font-weight: 700;
+            font-size: i == family ? 9.5px : 8.5px;
+            letter-spacing: 0.4px;
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => { picked(i); }
+        }
+    }
+    Image {
+        x: (parent.width - 60px) / 2;
+        y: 36px;
+        width: 60px;
+        height: 60px;
+        source: @image-url("art/knob-amp.png");
+        source-clip-y: (family >= 0 ? frames[family] : 31) * 60;
+        source-clip-width: 60;
+        source-clip-height: 60;
+        opacity: family >= 0 ? 1 : 0.6;
+        TouchArea {
+            mouse-cursor: ns-resize;
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down {
+                    root.start-f = Math.max(0, family);
+                    root.start-y = self.mouse-y;
+                }
+            }
+            moved => {
+                if self.pressed && clamp(round(root.start-f + (root.start-y - self.mouse-y) / 28px), 0, 4) != family {
+                    picked(clamp(round(root.start-f + (root.start-y - self.mouse-y) / 28px), 0, 4));
+                }
+            }
+            scroll-event(e) => {
+                picked(clamp(Math.max(0, family) + (e.delta-y > 0 ? 1 : -1), 0, 4));
+                accept
+            }
+        }
+    }
+}
+
+export component AmpHead inherits Rectangle {
+    in property <[KnobVal]> knobs;
+    in property <int> family;
+    in property <bool> variation;
+    in property <string> amp-name;
+    in property <bool> live;
+    in property <bool> connected;
+    callback knob-changed(int, int);
+    callback family-picked(int);
+    callback variation-toggled(bool);
+    // editor open: drop the grille band, keep the control panel
+    in property <bool> compact;
+
+    height: compact ? 158px : 262px;
+
+    cab := Rectangle {
+        border-radius: 14px;
+        background: #121110;
+        drop-shadow-blur: 34px;
+        drop-shadow-offset-y: 18px;
+        drop-shadow-color: #000000d0;
+        clip: true;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("art/tolex.png");
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+        }
+        // stage light from above
+        Rectangle { background: @linear-gradient(180deg, #ffffff12 0%, #00000000 35%, #00000066 100%); }
+        // vinyl edge roll
+        Rectangle {
+            border-radius: 14px;
+            border-width: 2px;
+            border-color: #ffffff12;
+        }
+
+        // ---- grille band with gold piping
+        if !compact: Rectangle {
+            x: 22px;
+            y: 18px;
+            width: parent.width - 44px;
+            height: 96px;
+            border-radius: 6px;
+            clip: true;
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: @image-url("art/grille.png");
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+            }
+            Rectangle { background: @linear-gradient(180deg, #000000a0 0%, #00000000 30%, #00000000 75%, #00000070 100%); }
+            Rectangle {
+                border-radius: 6px;
+                border-width: 2px;
+                border-color: #c09a50;
+            }
+            Rectangle {
+                x: 2px;
+                y: 2px;
+                width: parent.width - 4px;
+                height: parent.height - 4px;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: #00000090;
+            }
+            // logo: embossed brass script
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                Rectangle {
+                    width: logo-t.preferred-width;
+                    Text {
+                        x: 1px;
+                        y: 2px;
+                        text: logo-t.text;
+                        font-family: T.display;
+                        font-weight: 700;
+                        font-size: 46px;
+                        font-italic: true;
+                        letter-spacing: 6px;
+                        color: #000000c0;
+                        vertical-alignment: center;
+                        height: parent.height;
+                    }
+                    logo-t := Text {
+                        text: "KATANA";
+                        font-family: T.display;
+                        font-weight: 700;
+                        font-size: 46px;
+                        font-italic: true;
+                        letter-spacing: 6px;
+                        color: #e7cd8b;
+                        vertical-alignment: center;
+                        height: parent.height;
+                    }
+                }
+                Text {
+                    text: "MkII";
+                    font-family: T.display;
+                    font-weight: 700;
+                    font-size: 15px;
+                    color: #b8964f;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // ---- brushed brass control panel
+        Rectangle {
+            x: 22px;
+            y: compact ? 20px : 124px;
+            width: parent.width - 44px;
+            height: 118px;
+            border-radius: 5px;
+            clip: true;
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: @image-url("art/brass.png");
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+            }
+            Rectangle { background: @linear-gradient(180deg, #ffffff40 0%, #ffffff00 30%, #00000000 60%, #0000004a 100%); }
+            Rectangle { y: 0; height: 1px; background: #fff6d0a0; }
+            Rectangle { y: parent.height - 1px; height: 1px; background: #00000099; }
+            Rectangle {
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: #00000080;
+            }
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 18px;
+                padding-top: 10px;
+                padding-bottom: 8px;
+                spacing: 14px;
+                TypeSelector {
+                    family: family;
+                    picked(f) => { family-picked(f); }
+                }
+                // VARIATION push button
+                VerticalLayout {
+                    width: 66px;
+                    alignment: center;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        alignment: center;
+                        LedImg { state: variation ? 1 : 0; }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 40px;
+                            height: 22px;
+                            border-radius: 4px;
+                            background: vta.pressed ? #0b0a09 : @linear-gradient(180deg, #3a3633 0%, #141210 100%);
+                            border-width: 1px;
+                            border-color: #000;
+                            drop-shadow-blur: 3px;
+                            drop-shadow-offset-y: 2px;
+                            drop-shadow-color: #00000080;
+                            Rectangle { x: 2px; y: 1px; width: parent.width - 4px; height: 1px; background: #ffffff30; }
+                            vta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { variation-toggled(!variation); }
+                            }
+                        }
+                    }
+                    Text {
+                        text: "VARIATION";
+                        horizontal-alignment: center;
+                        color: #2a1d08;
+                        font-family: T.display;
+                        font-weight: 700;
+                        font-size: 9px;
+                        letter-spacing: 1px;
+                    }
+                }
+                Engrave { }
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    alignment: space-around;
+                    for k[i] in knobs: HeadKnob {
+                        k: k;
+                        changed(v) => { knob-changed(i, v); }
+                    }
+                }
+                Engrave { }
+                VerticalLayout {
+                    width: 82px;
+                    alignment: center;
+                    spacing: 4px;
+                    HorizontalLayout {
+                        alignment: center;
+                        Image {
+                            width: 40px;
+                            height: 40px;
+                            source: live ? @image-url("art/jewel-on.png") : @image-url("art/jewel-off.png");
+                        }
+                    }
+                    Text {
+                        text: live ? "LIVE" : connected ? "STANDBY" : "OFFLINE";
+                        horizontal-alignment: center;
+                        color: #2a1d08;
+                        font-family: T.display;
+                        font-weight: 700;
+                        font-size: 10px;
+                        letter-spacing: 1.6px;
+                    }
+                    Text {
+                        text: amp-name;
+                        horizontal-alignment: center;
+                        color: #2a1d08a0;
+                        font-family: T.display;
+                        font-weight: 700;
+                        font-size: 8.5px;
+                        overflow: elide;
+                        width: 82px;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- pedals
+
+component MiniDial inherits Rectangle {
+    in property <MiniKnob> k;
+    in property <bool> cream;
+    in property <color> ink;
+    callback changed(int);
+    property <float> t: (k.value - k.min) / Math.max(1, k.max - k.min);
+    property <int> start-v;
+    property <length> start-y;
+    width: 28px;
+    height: 40px;
+    Image {
+        x: 1px;
+        width: 26px;
+        height: 26px;
+        source: cream ? @image-url("art/knob-cream.png") : @image-url("art/knob-black.png");
+        source-clip-y: round(root.t * 63) * 26;
+        source-clip-width: 26;
+        source-clip-height: 26;
+    }
+    Text {
+        y: 29px;
+        x: -3px;
+        width: parent.width + 6px;
+        text: k.label;
+        horizontal-alignment: center;
+        overflow: clip;
+        color: ink.with-alpha(0.8);
+        font-family: T.display;
+        font-weight: 700;
+        font-size: 7.5px;
+        letter-spacing: 0.4px;
+    }
+    ta := TouchArea {
+        height: 28px;
+        mouse-cursor: ns-resize;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.start-v = k.value;
+                root.start-y = self.mouse-y;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.changed(clamp(round(root.start-v + (root.start-y - self.mouse-y) / 140px * (k.max - k.min)), k.min, k.max));
+            }
+        }
+        scroll-event(e) => {
+            root.changed(clamp(k.value + (e.delta-y > 0 ? 1 : -1) * Math.max(1, round((k.max - k.min) / 100)), k.min, k.max));
+            accept
+        }
+    }
+    if ta.has-hover || ta.pressed: Tip {
+        x: (parent.width - self.width) / 2;
+        y: -22px;
+        text: k.label + "  " + k.display;
+    }
+}
+
+export component PedalView inherits Rectangle {
+    in property <Pedal> p;
+    in property <bool> selected;
+    in property <bool> ghost;
+    in property <bool> lifted;
+    out property <bool> hovered: body-ta.has-hover;
+    out property <bool> dragging;
+    property <length> press-x;
+    callback knob(int, int);
+    callback toggled;
+    callback clicked;
+    callback drag-start;
+    callback drag-move(length);
+    callback dropped;
+
+    width: 92px;
+    height: 176px;
+
+    // selection halo
+    if selected: Rectangle {
+        x: -4px;
+        y: body.y - 4px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        border-radius: 11px;
+        border-width: 2px;
+        border-color: T.gold-hi;
+    }
+    body := Rectangle {
+        y: lifted ? -10px : (hovered && !ghost) || selected ? -3px : 0;
+        width: parent.width;
+        height: parent.height;
+        opacity: ghost ? 0.18 : 1;
+        animate y { duration: 110ms; easing: ease-out; }
+        border-radius: 7px;
+        background: p.is-amp ? #141210 : @linear-gradient(180deg, p.hue.brighter(0.12) 0%, p.hue 55%, p.hue.darker(0.12) 100%);
+        drop-shadow-blur: lifted ? 22px : 10px;
+        drop-shadow-offset-y: lifted ? 16px : 6px;
+        drop-shadow-color: #000000c8;
+
+        // AMP block: a miniature Katana head — tolex, brass control strip, grille with logo
+        if p.is-amp: Rectangle {
+            border-radius: 7px;
+            clip: true;
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: @image-url("art/tolex.png");
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+            }
+            // brass control strip behind the three dials
+            Rectangle {
+                x: 5px;
+                y: 20px;
+                width: parent.width - 10px;
+                height: 46px;
+                border-radius: 3px;
+                clip: true;
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("art/brass.png");
+                    horizontal-tiling: repeat;
+                }
+                Rectangle { background: @linear-gradient(180deg, #ffffff38 0%, #00000000 35%, #00000018 100%); }
+            }
+            // grille with gold piping, logo and amp type
+            Rectangle {
+                x: 5px;
+                y: 72px;
+                width: parent.width - 10px;
+                height: parent.height - 78px;
+                border-radius: 3px;
+                clip: true;
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("art/grille.png");
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                }
+                Rectangle { background: @linear-gradient(180deg, #00000000 0%, #00000000 55%, #00000070 100%); }
+                Rectangle {
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: #b8964f;
+                }
+                Text {
+                    y: 22px;
+                    width: parent.width;
+                    horizontal-alignment: center;
+                    text: "KATANA";
+                    color: #e7cd8b;
+                    font-family: T.display;
+                    font-weight: 800;
+                    font-italic: true;
+                    font-size: 13px;
+                    letter-spacing: 1.5px;
+                }
+                Rectangle {
+                    x: 14px;
+                    y: 42px;
+                    width: parent.width - 28px;
+                    height: 1px;
+                    background: #b8964f80;
+                }
+                Text {
+                    y: 50px;
+                    x: 4px;
+                    width: parent.width - 8px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    text: p.type-name;
+                    color: #d8c08a;
+                    font-family: T.display;
+                    font-weight: 700;
+                    font-size: 8.5px;
+                    letter-spacing: 0.6px;
+                }
+            }
+        }
+        if !p.is-amp: Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("art/pedal.png");
+        }
+
+        LedImg {
+            x: (parent.width - 22px) / 2;
+            y: 2px;
+            state: p.on ? p.led : 0;
+        }
+        HorizontalLayout {
+            y: 22px;
+            height: 40px;
+            alignment: center;
+            spacing: 0px;
+            for k[i] in p.knobs: MiniDial {
+                k: k;
+                cream: p.is-amp;
+                ink: p.is-amp ? #1a1004 : p.ink;
+                changed(v) => { knob(i, v); }
+            }
+        }
+        if !p.is-amp: Text {
+            y: 66px;
+            width: parent.width;
+            text: p.title;
+            horizontal-alignment: center;
+            color: p.ink;
+            font-family: T.display;
+            font-weight: 700;
+            font-size: p.title.character-count > 8 ? 11px : 14px;
+            letter-spacing: 1.2px;
+        }
+        if !p.is-amp && p.type-name != p.title: Text {
+            y: 84px;
+            width: parent.width - 8px;
+            x: 4px;
+            text: p.type-name;
+            horizontal-alignment: center;
+            overflow: elide;
+            color: p.ink.with-alpha(0.72);
+            font-family: T.display;
+            font-weight: 700;
+            font-size: 9px;
+            letter-spacing: 0.6px;
+        }
+
+        body-ta := TouchArea {
+            y: 64px;
+            height: parent.height - 64px;
+            mouse-cursor: p.movable ? (root.dragging ? grabbing : grab) : pointer;
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                    root.press-x = self.mouse-x;
+                    root.dragging = false;
+                }
+                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left {
+                    if root.dragging {
+                        root.dragging = false;
+                        root.dropped();
+                    } else {
+                        root.clicked();
+                    }
+                }
+            }
+            moved => {
+                if self.pressed {
+                    if !root.dragging && p.movable && abs(self.mouse-x - root.press-x) > 8px {
+                        root.dragging = true;
+                        root.drag-start();
+                    }
+                    if root.dragging {
+                        root.drag-move(self.mouse-x);
+                    }
+                }
+            }
+        }
+        if p.has-sw: Image {
+            x: (parent.width - 40px) / 2;
+            y: 120px;
+            width: 40px;
+            height: 40px;
+            source: @image-url("art/footswitch.png");
+            Rectangle {
+                visible: fsa.pressed;
+                x: 8px;
+                y: 8px;
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: #00000050;
+            }
+            fsa := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { toggled(); }
+            }
+        }
+    }
+}
+
+/// Short patch cable between two jacks, horizontal, cylindrical shading.
+export component Cable inherits Rectangle {
+    in property <bool> hot;
+    height: 7px;
+    border-radius: 3.5px;
+    background: @linear-gradient(180deg, #000000 0%, (hot ? #4a3a1c : #2f2f31) 35%, #070707 100%);
+    drop-shadow-blur: 4px;
+    drop-shadow-offset-y: 3px;
+    drop-shadow-color: #00000090;
+}
+
+export component Jack inherits Image {
+    width: 26px;
+    height: 26px;
+    source: @image-url("art/jack.png");
+}

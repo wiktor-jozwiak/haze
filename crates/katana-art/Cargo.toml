@@ -1,0 +1,10 @@
+[package]
+name = "katana-art"
+description = "Offline generator of the UI bitmaps (tolex, brushed brass, knob sprites, pedal shading). Run once; output is committed."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+png = "0.17"

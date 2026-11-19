@@ -1,0 +1,10 @@
+[package]
+name = "katana-core"
+description = "BOSS KATANA MkII: SysEx protocol, parameter map, patch model, .tsl codec, tone library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
