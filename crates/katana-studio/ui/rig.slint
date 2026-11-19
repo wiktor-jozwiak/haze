@@ -1,14 +1,15 @@
-// Upper deck: horizontal signal chain (IN → blocks → OUT) and the Amp Core panel.
-// Studio chrome is flat fills and 1px hairlines; the stompboxes are pre-rendered bitmaps.
+// Upper deck: horizontal signal chain (IN → blocks → OUT), drawn as real stompboxes patched
+// jack to jack. A box shows its main knobs (drag up/down or wheel to turn, pointer = real value),
+// status LED, block name, active subtype and the footswitch. The bottom inspector edits every
+// parameter; both read the same patch.
 import { T } from "theme.slint";
-import { Knob, Led } from "widgets.slint";
+import { Led, Icons } from "widgets.slint";
 
-export struct MiniKnob {
+/// One knob on a pedal face: short label, position 0..1 and the displayed value.
+export struct PedalKnob {
     label: string,
-    value: int,
-    min: int,
-    max: int,
-    display: string,
+    norm: float,
+    text: string,
 }
 
 export struct Pedal {
@@ -19,18 +20,11 @@ export struct Pedal {
     led: int,
     hue: color,
     ink: color,
-    knobs: [MiniKnob],
     movable: bool,
     is-amp: bool,
-}
-
-export struct KnobVal {
-    label: string,
-    value: int,
-    min: int,
-    max: int,
-    reset: int,
-    display: string,
+    knobs: [PedalKnob],
+    /// index into Glyphs (Panel.nodes order), used by the inspector header emblem
+    kind: int,
 }
 
 /// Status LED (kept under the old name; drawn, not a bitmap).
@@ -46,462 +40,324 @@ export component LedImg inherits Rectangle {
     }
 }
 
-// ---------------------------------------------------------------- amp core
+// ---------------------------------------------------------------- blocks
 
-/// Voicing button. `family` < 0: voicing exists only in the PC DSP engine.
-component Voicing inherits Rectangle {
-    in property <string> text;
-    in property <bool> active;
-    in property <bool> enabled: true;
-    callback clicked;
-    height: 28px;
-    border-radius: T.r;
-    background: active ? T.accent : ta.has-hover && enabled ? T.hover : T.well;
-    border-width: 1px;
-    border-color: active ? T.accent : T.line;
-    opacity: enabled ? 1 : 0.4;
-    Text {
-        text: root.text;
-        color: active ? T.accent-ink : T.text-2;
-        font-family: T.mono;
-        font-weight: 600;
-        font-size: 10.5px;
-        letter-spacing: 0.8px;
-    }
-    ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+/// Small hex screw head in the enclosure corners.
+component Screw inherits Rectangle {
+    width: 5px;
+    height: 5px;
+    border-radius: 2.5px;
+    background: #00000059;
+    Rectangle {
+        x: 1px;
+        y: 1px;
+        width: 3px;
+        height: 3px;
+        border-radius: 1.5px;
+        background: #ffffff2e;
     }
 }
 
-export component AmpCore inherits Rectangle {
-    in property <[KnobVal]> knobs;
-    in property <int> family;
-    in property <bool> variation;
-    in property <string> amp-name;
-    in property <bool> live;
-    in property <bool> connected;
-    in property <bool> compact;
-    /// PC-engine voicing picked that the Katana lacks (2 PUSHED, 6 MODERN), -1 none
-    in property <int> dsp-voicing: -1;
-    callback knob-changed(int, int);
-    callback family-picked(int);
-    callback variation-toggled(bool);
-    callback dsp-voicing-picked(int);
-
-    // label, Katana family index (-1 = not on the Katana MkII), PC engine voicing index
-    property <[{n: string, f: int, d: int}]> voicings: [
-        { n: "ACOUSTIC", f: 0, d: 0 }, { n: "CLEAN", f: 1, d: 1 }, { n: "PUSHED", f: -1, d: 2 }, { n: "CRUNCH", f: 2, d: 3 },
-        { n: "LEAD", f: 3, d: 4 }, { n: "BROWN", f: 4, d: 5 }, { n: "MODERN", f: -1, d: 6 },
-    ];
-
-    height: compact ? 132px : 168px;
-    border-radius: 6px;
-    background: T.panel;
-    border-width: 1px;
-    border-color: T.line;
-
-    HorizontalLayout {
-        padding: 16px;
-        padding-left: 20px;
-        spacing: 20px;
-        // voicing column
-        VerticalLayout {
-            width: 268px;
-            spacing: 8px;
-            alignment: start;
-            HorizontalLayout {
-                spacing: 8px;
-                Text {
-                    text: "AMP";
-                    color: T.text;
-                    font-family: T.mono;
-                    font-weight: 700;
-                    font-size: 13px;
-                    letter-spacing: 2px;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: amp-name;
-                    color: T.text-3;
-                    font-family: T.mono;
-                    font-size: 11px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                }
-            }
-            Rectangle {
-                height: 2 * 28px + 6px;
-                for v[i] in voicings: Voicing {
-                    x: mod(i, 4) * (parent.width + 6px) / 4;
-                    y: floor(i / 4) * 34px;
-                    width: (parent.width - 18px) / 4;
-                    text: v.n;
-                    active: dsp-voicing >= 0 ? v.d == dsp-voicing : v.f >= 0 && v.f == family;
-                    enabled: v.f >= 0 || !T.hw;
-                    clicked => {
-                        if v.f >= 0 { family-picked(v.f); } else { dsp-voicing-picked(v.d); }
-                    }
-                }
-                // VARIATION in the 8th cell
-                Rectangle {
-                    x: 3 * (parent.width + 6px) / 4;
-                    y: 34px;
-                    width: (parent.width - 18px) / 4;
-                    height: 28px;
-                    border-radius: T.r;
-                    background: vta.has-hover ? T.hover : T.well;
-                    border-width: 1px;
-                    border-color: variation ? T.accent-lo : T.line;
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 5px;
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 6px;
-                                height: 6px;
-                                border-radius: 3px;
-                                background: variation ? T.accent : #2A2D35;
-                            }
-                        }
-                        Text {
-                            text: "VAR";
-                            color: variation ? T.accent-hi : T.text-2;
-                            font-family: T.mono;
-                            font-weight: 600;
-                            font-size: 10.5px;
-                            letter-spacing: 0.8px;
-                            vertical-alignment: center;
-                        }
-                    }
-                    vta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { variation-toggled(!variation); }
-                    }
-                }
-            }
-            if !compact && T.hw: Text {
-                text: "PUSHED / MODERN: tylko silnik PC DSP";
-                color: T.text-3;
-                font-size: 10.5px;
-            }
-        }
-        Rectangle { width: 1px; background: T.line; }
-        // encoders
-        HorizontalLayout {
-            horizontal-stretch: 1;
-            alignment: space-around;
-            for k[i] in knobs: VerticalLayout {
-                alignment: center;
-                Knob {
-                    dial: compact ? 48px : 58px;
-                    label: k.label;
-                    value: k.value;
-                    min: k.min;
-                    max: k.max;
-                    reset: k.reset;
-                    display: k.display;
-                    changed(v) => { knob-changed(i, v); }
-                }
-            }
-        }
-        Rectangle { width: 1px; background: T.line; }
-        // engine state
-        VerticalLayout {
-            width: 96px;
-            alignment: center;
-            spacing: 8px;
-            HorizontalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 14px;
-                    height: 14px;
-                    border-radius: 7px;
-                    background: live ? T.accent : #2A2D35;
-                    Rectangle {
-                        visible: live;
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 14px;
-                        background: T.accent.with-alpha(0.16);
-                    }
-                }
-            }
-            Text {
-                text: live ? "LIVE" : connected ? "STANDBY" : "OFFLINE";
-                horizontal-alignment: center;
-                color: live ? T.accent-hi : T.text-2;
-                font-family: T.mono;
-                font-weight: 700;
-                font-size: 11px;
-                letter-spacing: 2px;
-            }
-        }
-    }
+/// Side jack: the patch cable plugs in here.
+component Jack inherits Rectangle {
+    width: 6px;
+    height: 12px;
+    border-radius: 2px;
+    background: @linear-gradient(180deg, #C9CDD4 0%, #7D828B 55%, #4B4F57 100%);
 }
 
-// ---------------------------------------------------------------- stompboxes
-// Realistic pedals: pre-rendered bitmaps from crates/katana-art (enclosure shading, knob
-// sprite sheets, footswitch, LEDs). The CPU renderer only blits and clips them.
-
-component Tip inherits Rectangle {
-    in property <string> text;
-    width: tt.preferred-width + 14px;
-    height: 20px;
-    border-radius: 4px;
-    background: #0D0E11EE;
-    border-width: 1px;
-    border-color: #ffffff1a;
-    tt := Text {
-        text: root.text;
-        color: #E8EAF0;
-        font-family: T.display;
-        font-weight: 700;
-        font-size: 11px;
-    }
-}
-
-component LedBmp inherits Image {
-    in property <int> state; // 0 off, 1 green, 2 red, 3 yellow
+/// Jewel status LED with a soft halo when lit.
+component Jewel inherits Rectangle {
+    in property <color> c;
+    in property <bool> lit;
     width: 22px;
     height: 22px;
-    source: state == 1 ? @image-url("art/led-green.png") : state == 2 ? @image-url("art/led-red.png") : state == 3 ? @image-url("art/led-yellow.png") : @image-url("art/led-off.png");
-}
-
-component MiniDial inherits Rectangle {
-    in property <MiniKnob> k;
-    in property <bool> cream;
-    in property <color> ink;
-    callback changed(int);
-    property <float> t: (k.value - k.min) / Math.max(1, k.max - k.min);
-    property <int> start-v;
-    property <length> start-y;
-    width: 28px;
-    height: 40px;
-    Image {
-        x: 1px;
-        width: 26px;
-        height: 26px;
-        source: cream ? @image-url("art/knob-cream.png") : @image-url("art/knob-black.png");
-        source-clip-y: round(root.t * 63) * 26;
-        source-clip-width: 26;
-        source-clip-height: 26;
+    Rectangle {
+        visible: lit;
+        border-radius: 11px;
+        background: c.with-alpha(0.22);
     }
-    Text {
-        y: 29px;
-        x: -3px;
-        width: parent.width + 6px;
-        text: k.label;
-        horizontal-alignment: center;
-        overflow: clip;
-        color: ink.with-alpha(0.8);
-        font-family: T.display;
-        font-weight: 700;
-        font-size: 7.5px;
-        letter-spacing: 0.4px;
-    }
-    ta := TouchArea {
-        height: 28px;
-        mouse-cursor: ns-resize;
-        pointer-event(e) => {
-            if e.kind == PointerEventKind.down {
-                root.start-v = k.value;
-                root.start-y = self.mouse-y;
+    Rectangle {
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: #000000a0;
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: lit ? c : #2A2D35;
+            Rectangle {
+                x: 1.5px;
+                y: 1.5px;
+                width: 3px;
+                height: 3px;
+                border-radius: 1.5px;
+                background: lit ? #ffffffb0 : #ffffff14;
             }
         }
-        moved => {
-            if self.pressed {
-                root.changed(clamp(round(root.start-v + (root.start-y - self.mouse-y) / 140px * (k.max - k.min)), k.min, k.max));
-            }
-        }
-        scroll-event(e) => {
-            root.changed(clamp(k.value + (e.delta-y > 0 ? 1 : -1) * Math.max(1, round((k.max - k.min) / 100)), k.min, k.max));
-            accept
-        }
-    }
-    if ta.has-hover || ta.pressed: Tip {
-        x: (parent.width - self.width) / 2;
-        y: -22px;
-        text: k.label + "  " + k.display;
     }
 }
 
+/// Chicken-skirt knob: black cap, silver skirt, white pointer (-135°..+135°).
+component FaceKnob inherits Rectangle {
+    in property <float> norm;
+    in property <length> size: 22px;
+    property <angle> a: (-135 + 270 * clamp(norm, 0, 1)) * 1deg;
+    width: size;
+    height: size;
+    // skirt
+    Rectangle {
+        border-radius: root.size / 2;
+        background: @linear-gradient(160deg, #D8DBE0 0%, #8C9099 100%);
+        drop-shadow-blur: 3px;
+        drop-shadow-offset-y: 1.5px;
+        drop-shadow-color: #00000090;
+    }
+    // cap
+    Rectangle {
+        width: root.size - 5px;
+        height: root.size - 5px;
+        border-radius: (root.size - 5px) / 2;
+        background: @linear-gradient(160deg, #3A3C42 0%, #121316 100%);
+    }
+    Path {
+        width: root.size;
+        height: root.size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: #F4F5F7;
+        stroke-width: 2px;
+        MoveTo { x: 12 + 3 * Math.sin(root.a); y: 12 - 3 * Math.cos(root.a); }
+        LineTo { x: 12 + 9.5 * Math.sin(root.a); y: 12 - 9.5 * Math.cos(root.a); }
+    }
+}
+
+/// Classic enamel stompbox, top-down: a row of knobs (the block's main params, pointer shows the
+/// real value), jewel LED, silkscreened name and subtype, metal footswitch (click = bypass).
+/// The amp is drawn as a small head: brushed panel with its knobs, tolex, grille cloth.
+/// Body click selects the block for the inspector, drag reorders it. Hover shows knob values.
 export component PedalView inherits Rectangle {
     in property <Pedal> p;
     in property <bool> selected;
     in property <bool> ghost;
     in property <bool> lifted;
-    out property <bool> hovered: body-ta.has-hover;
+    out property <bool> hovered: body-ta.has-hover || sw-ta.has-hover || knob-ta.has-hover;
     out property <bool> dragging;
+    /// distance from the top of the box to the centre of its side jacks (cables run there)
+    out property <length> jack-y: 62px;
     property <length> press-x;
-    callback knob(int, int);
+    property <bool> bypassed: p.has-sw && !p.on;
+    property <color> led-c: p.led == 2 ? T.led-red : p.led == 3 ? T.led-yellow : T.led-green;
+    property <int> nk: p.knobs.length;
+    property <length> ks: clamp((root.width - 14px) / 3 - 6px, 16px, 24px);
+    // two knobs spread a little wider than three
+    property <length> kpitch: (root.width - 10px) / (root.nk == 2 ? 2.4 : 3);
+    property <length> kx0: (root.width - root.nk * root.kpitch) / 2;
+    property <color> ink-2: p.ink.with-alpha(0.72);
     callback toggled;
     callback clicked;
     callback drag-start;
     callback drag-move(length);
     callback dropped;
+    /// knob `k` dragged to `norm` (0..1) / wheel `dir` detents
+    callback knob-set(int, float);
+    callback knob-step(int, int);
+    property <int> knob-i: -1;
+    property <float> knob-start;
+    property <length> knob-y0;
 
-    width: 92px;
-    height: 176px;
+    width: 96px;
+    height: 160px;
 
-    // selection halo
-    if selected: Rectangle {
-        x: -4px;
-        y: body.y - 4px;
-        width: parent.width + 8px;
-        height: parent.height + 8px;
-        border-radius: 11px;
-        border-width: 2px;
-        border-color: T.accent-hi;
-    }
     body := Rectangle {
-        y: lifted ? -10px : (hovered && !ghost) || selected ? -3px : 0;
+        y: lifted ? -8px : hovered && !ghost ? -2px : 0;
         width: parent.width;
         height: parent.height;
-        opacity: ghost ? 0.18 : 1;
+        opacity: ghost ? 0.15 : bypassed && !lifted ? 0.55 : 1;
         animate y { duration: 110ms; easing: ease-out; }
-        border-radius: 7px;
-        background: p.is-amp ? #141210 : @linear-gradient(180deg, p.hue.brighter(0.12) 0%, p.hue 55%, p.hue.darker(0.12) 100%);
-        drop-shadow-blur: lifted ? 22px : 10px;
-        drop-shadow-offset-y: lifted ? 16px : 6px;
-        drop-shadow-color: #000000c8;
+        animate opacity { duration: 120ms; }
 
-        // AMP block: a miniature Katana head — tolex, brass control strip, grille with logo
+        if selected: Rectangle {
+            x: -5px;
+            y: -5px;
+            width: parent.width + 10px;
+            height: parent.height + 10px;
+            border-radius: 15px;
+            border-width: 2px;
+            border-color: T.accent;
+        }
+        Jack { x: -5px; y: root.jack-y - 6px; }
+        Jack { x: parent.width - 1px; y: root.jack-y - 6px; }
+
+        // ------------------------------------------------ enclosure
+        Rectangle {
+            border-radius: 10px;
+            drop-shadow-blur: lifted ? 22px : 8px;
+            drop-shadow-offset-y: lifted ? 14px : 4px;
+            drop-shadow-color: lifted ? #000000c0 : #00000090;
+            background: p.is-amp
+                ? @linear-gradient(180deg, #2C2E33 0%, #18191C 100%)
+                : @linear-gradient(180deg, p.hue.brighter(0.22) 0%, p.hue 30%, p.hue.darker(0.22) 100%);
+        }
+        // enamel sheen + edge
+        Rectangle {
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: p.is-amp ? #3A3C42 : p.hue.darker(0.45);
+        }
+        Rectangle {
+            x: 6px;
+            y: 1px;
+            width: parent.width - 12px;
+            height: 1px;
+            background: #ffffff40;
+        }
+
+        // ------------------------------------------------ amp head panel (behind its knobs)
         if p.is-amp: Rectangle {
-            border-radius: 7px;
-            clip: true;
-            Image {
-                width: parent.width;
-                height: parent.height;
-                source: @image-url("art/tolex.png");
-                horizontal-tiling: repeat;
-                vertical-tiling: repeat;
-            }
-            // brass control strip behind the three dials
-            Rectangle {
-                x: 5px;
-                y: 20px;
-                width: parent.width - 10px;
-                height: 46px;
-                border-radius: 3px;
-                clip: true;
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: @image-url("art/brass.png");
-                    horizontal-tiling: repeat;
-                }
-                Rectangle { background: @linear-gradient(180deg, #ffffff38 0%, #00000000 35%, #00000018 100%); }
-            }
-            // grille with gold piping, logo and amp type
-            Rectangle {
-                x: 5px;
-                y: 72px;
-                width: parent.width - 10px;
-                height: parent.height - 78px;
-                border-radius: 3px;
-                clip: true;
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: @image-url("art/grille.png");
-                    horizontal-tiling: repeat;
-                    vertical-tiling: repeat;
-                }
-                Rectangle { background: @linear-gradient(180deg, #00000000 0%, #00000000 55%, #00000070 100%); }
-                Rectangle {
-                    border-radius: 3px;
-                    border-width: 1px;
-                    border-color: #b8964f;
-                }
-                Text {
-                    y: 22px;
-                    width: parent.width;
-                    horizontal-alignment: center;
-                    text: "KATANA";
-                    color: #e7cd8b;
-                    font-family: T.display;
-                    font-weight: 800;
-                    font-italic: true;
-                    font-size: 13px;
-                    letter-spacing: 1.5px;
-                }
-                Rectangle {
-                    x: 14px;
-                    y: 42px;
-                    width: parent.width - 28px;
-                    height: 1px;
-                    background: #b8964f80;
-                }
-                Text {
-                    y: 50px;
-                    x: 4px;
-                    width: parent.width - 8px;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                    text: p.type-name;
-                    color: #d8c08a;
-                    font-family: T.display;
-                    font-weight: 700;
-                    font-size: 8.5px;
-                    letter-spacing: 0.6px;
-                }
-            }
-        }
-        if !p.is-amp: Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("art/pedal.png");
+            x: 5px;
+            y: 5px;
+            width: parent.width - 10px;
+            height: 68px;
+            border-radius: 6px;
+            background: @linear-gradient(180deg, T.accent-hi 0%, T.accent 50%, T.accent.darker(0.2) 100%);
+            border-width: 1px;
+            border-color: #00000050;
         }
 
-        LedBmp {
-            x: (parent.width - 22px) / 2;
-            y: 2px;
-            state: p.on ? p.led : 0;
-        }
-        HorizontalLayout {
-            y: 22px;
-            height: 40px;
-            alignment: center;
-            spacing: 0px;
-            for k[i] in p.knobs: MiniDial {
-                k: k;
-                cream: p.is-amp;
-                ink: p.is-amp ? #1a1004 : p.ink;
-                changed(v) => { knob(i, v); }
+        // ------------------------------------------------ knobs + labels / values
+        for k[i] in p.knobs: Rectangle {
+            x: root.kx0 + i * root.kpitch;
+            y: p.is-amp ? 10px : 9px;
+            width: root.kpitch;
+            height: root.ks + 14px;
+            FaceKnob {
+                x: (parent.width - self.width) / 2;
+                y: 0;
+                size: root.ks;
+                norm: k.norm;
+            }
+            Text {
+                x: -4px;
+                y: root.ks + 2px;
+                width: parent.width + 8px;
+                // narrow boxes (laptop widths): labels only make noise, hover still shows values
+                visible: root.hovered || root.kpitch >= 27px || root.nk < 3;
+                text: root.hovered ? k.text : k.label;
+                horizontal-alignment: center;
+                overflow: elide;
+                color: p.is-amp ? T.accent-ink : root.ink-2;
+                font-size: 9px;
+                font-weight: 600;
             }
         }
-        if !p.is-amp: Text {
-            y: 66px;
-            width: parent.width;
-            text: p.title;
-            horizontal-alignment: center;
-            color: p.ink;
-            font-family: T.display;
-            font-weight: 700;
-            font-size: p.title.character-count > 8 ? 11px : 14px;
-            letter-spacing: 1.2px;
+
+        // ------------------------------------------------ stompbox face
+        if !p.is-amp: Rectangle {
+            Jewel {
+                x: (parent.width - self.width) / 2;
+                y: root.jack-y - 11px;
+                c: root.led-c;
+                lit: p.on;
+            }
+            Text {
+                x: 6px;
+                y: 76px;
+                width: parent.width - 12px;
+                text: p.title;
+                horizontal-alignment: center;
+                overflow: elide;
+                color: p.ink;
+                font-size: 13px;
+                font-weight: 800;
+            }
+            Text {
+                x: 6px;
+                y: 93px;
+                width: parent.width - 12px;
+                text: p.type-name;
+                horizontal-alignment: center;
+                overflow: elide;
+                color: root.ink-2;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            // footswitch: nut ring + domed metal cap
+            Rectangle {
+                y: parent.height - 47px;
+                width: 36px;
+                height: 36px;
+                border-radius: 18px;
+                background: #00000066;
+                Rectangle {
+                    width: 30px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: sw-ta.pressed
+                        ? @linear-gradient(135deg, #8A8F98 0%, #D0D3D8 100%)
+                        : @linear-gradient(135deg, #F3F4F6 0%, #B9BDC4 50%, #70757E 100%);
+                    border-width: 1px;
+                    border-color: #2E3036;
+                    Rectangle {
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 8px;
+                        background: @linear-gradient(135deg, #C9CCD2 0%, #9196A0 100%);
+                    }
+                }
+            }
+            Screw { x: 6px; y: parent.height - 11px; }
+            Screw { x: parent.width - 11px; y: parent.height - 11px; }
         }
-        if !p.is-amp && p.type-name != p.title: Text {
-            y: 84px;
-            width: parent.width - 8px;
-            x: 4px;
-            text: p.type-name;
-            horizontal-alignment: center;
-            overflow: elide;
-            color: p.ink.with-alpha(0.72);
-            font-family: T.display;
-            font-weight: 700;
-            font-size: 9px;
-            letter-spacing: 0.6px;
+
+        // ------------------------------------------------ amp head: name, model, grille
+        if p.is-amp: Rectangle {
+            Text {
+                x: 6px;
+                y: 52px;
+                width: parent.width - 12px;
+                text: p.title;
+                horizontal-alignment: center;
+                color: T.accent-ink;
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 1.5px;
+            }
+            Text {
+                x: 6px;
+                y: 78px;
+                width: parent.width - 12px;
+                height: 28px;
+                text: p.type-name;
+                wrap: word-wrap;
+                overflow: elide;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: #D8DBE0;
+                font-size: 10.5px;
+                font-weight: 600;
+            }
+            Rectangle {
+                x: 5px;
+                y: 110px;
+                width: parent.width - 10px;
+                height: parent.height - 115px;
+                border-radius: 5px;
+                background: #2E3036;
+                border-width: 1px;
+                border-color: #00000070;
+                for g[i] in Math.floor((root.height - 121px) / 4px): Rectangle {
+                    x: 3px;
+                    y: 3px + i * 4px;
+                    width: parent.width - 6px;
+                    height: 1px;
+                    background: #00000060;
+                }
+            }
         }
 
         body-ta := TouchArea {
-            y: 64px;
-            height: parent.height - 64px;
             mouse-cursor: p.movable ? (root.dragging ? grabbing : grab) : pointer;
             pointer-event(e) => {
                 if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
@@ -529,25 +385,49 @@ export component PedalView inherits Rectangle {
                 }
             }
         }
-        if p.has-sw: Image {
-            x: (parent.width - 40px) / 2;
-            y: 120px;
-            width: 40px;
-            height: 40px;
-            source: @image-url("art/footswitch.png");
-            Rectangle {
-                visible: fsa.pressed;
-                x: 8px;
-                y: 8px;
-                width: 24px;
-                height: 24px;
-                border-radius: 12px;
-                background: #00000050;
+        // knob row sits above the body's touch area: vertical drag or wheel turns the knob
+        // under the pointer (150px = full sweep), a plain click still selects the block
+        knob-ta := TouchArea {
+            enabled: !root.ghost && !root.lifted && root.nk > 0;
+            x: root.kx0;
+            y: p.is-amp ? 6px : 5px;
+            width: root.nk * root.kpitch;
+            height: root.ks + 8px;
+            mouse-cursor: ns-resize;
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                    root.knob-i = clamp(floor(self.mouse-x / root.kpitch), 0, root.nk - 1);
+                    root.knob-start = p.knobs[root.knob-i].norm;
+                    root.knob-y0 = self.mouse-y;
+                }
+                if e.kind == PointerEventKind.up && e.button == PointerEventButton.left {
+                    if abs(self.mouse-y - root.knob-y0) < 3px {
+                        root.clicked();
+                    }
+                    root.knob-i = -1;
+                }
             }
-            fsa := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { toggled(); }
+            moved => {
+                if self.pressed && root.knob-i >= 0 && abs(self.mouse-y - root.knob-y0) >= 3px {
+                    root.knob-set(root.knob-i, clamp(root.knob-start + (root.knob-y0 - self.mouse-y) / 150px, 0, 1));
+                }
             }
+            scroll-event(e) => {
+                if e.delta-y == 0 {
+                    return reject;
+                }
+                root.knob-step(clamp(floor(self.mouse-x / root.kpitch), 0, root.nk - 1), e.delta-y > 0 ? 1 : -1);
+                accept
+            }
+        }
+        // footswitch area sits above the body's touch area: stomp = bypass
+        sw-ta := TouchArea {
+            visible: p.has-sw;
+            enabled: p.has-sw;
+            y: root.height - 56px;
+            height: 56px;
+            mouse-cursor: pointer;
+            clicked => { toggled(); }
         }
     }
 }
@@ -560,24 +440,22 @@ export component ChainNode inherits Rectangle {
     in property <string> text;
     in property <bool> hot;
     width: 40px;
-    height: 40px;
-    border-radius: 20px;
-    background: T.well;
-    border-width: 1px;
-    border-color: hot ? T.accent-lo : T.line-hi;
+    height: 26px;
+    border-radius: 13px;
+    background: T.panel-hi;
     Text {
         text: root.text;
         color: hot ? T.accent-hi : T.text-2;
-        font-family: T.mono;
-        font-weight: 700;
-        font-size: 10px;
-        letter-spacing: 1px;
+        font-weight: 600;
+        font-size: 11px;
     }
 }
 
 /// Signal wire between blocks.
+/// Patch cable between jacks.
 export component Wire inherits Rectangle {
     in property <bool> hot;
-    height: 2px;
-    background: hot ? T.accent-lo : T.line-hi;
+    height: 3px;
+    border-radius: 1.5px;
+    background: hot ? T.accent : #3A3E47;
 }

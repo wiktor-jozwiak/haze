@@ -7,12 +7,20 @@
 //! `haze dump <tone>`        every parameter as BLOCK.PRM=value
 //! `haze derive <base> <name> BLOCK.PRM=value…`  new tone from a copy of <base>, saved to the library
 //! `haze dsp-render out.wav [s]` render the DI riff through the PC DSP chain
-//! `haze dsp-probe`          open the audio device muted for 3 s, report callback load
+//! `haze dsp-probe [input]`  open the audio device muted for 3 s, report callback load
+//! `haze dsp-devices`        list selectable audio inputs / outputs
 //! `haze --png out.png [--tab N] [--hover X,Y] [--size WxH]`  render one frame offscreen (CPU renderer) for visual checks
+//! `haze snapshot-check <dir> [--update]`  render the fixed views against a fixture library, compare with goldens
 
 mod app;
+mod check;
 mod panel;
 mod snapshot;
+mod eqcurve;
+mod history;
+mod templates;
+#[cfg(test)]
+mod uitest;
 
 use katana_core::Library;
 
@@ -53,6 +61,11 @@ fn main() {
             }
             println!("— {} brzmień, {} setlist · {}", lib.tones.len(), lib.setlists.len(), lib.root().display());
         }
+        Some("snapshot-check") => {
+            let dir = args.get(1).filter(|a| !a.starts_with("--")).map_or("crates/katana-studio/tests/golden", String::as_str);
+            let ok = check::run(std::path::Path::new(dir), args.iter().any(|a| a == "--update"));
+            std::process::exit(if ok { 0 } else { 1 });
+        }
         Some("--png") => {
             let out = args.get(1).cloned().unwrap_or_else(|| "haze.png".into());
             let tab = args.iter().position(|a| a == "--tab").and_then(|i| args.get(i + 1)).and_then(|t| t.parse().ok()).unwrap_or(-1);
@@ -90,12 +103,21 @@ fn main() {
                 Err(e) => eprintln!("{e}"),
             }
         }
+        Some("dsp-devices") => {
+            for (k, inp) in [("wejścia", true), ("wyjścia", false)] {
+                println!("{k}:");
+                for d in haze_dsp::list_devices(inp) {
+                    println!("  {:<28} {}{}", d.id, d.label, if d.mic { "  [mikrofon?]" } else { "" });
+                }
+            }
+        }
         Some("dsp-probe") => {
             // open the real audio device for 3 s with the output muted: proves cpal I/O + load
             let p = std::sync::Arc::new(haze_dsp::Params::default());
             p.set(haze_dsp::P::Source, 1.0);
             p.set(haze_dsp::P::OutGainDb, -120.0);
-            match haze_dsp::Engine::start(p, &haze_dsp::Config::default()) {
+            let cfg = haze_dsp::Config { input: args.get(1).cloned(), ..Default::default() };
+            match haze_dsp::Engine::start(p, &cfg) {
                 Ok(e) => {
                     println!("{:?}", e.info);
                     let mut worst = 0f32;

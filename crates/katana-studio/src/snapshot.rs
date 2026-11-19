@@ -8,7 +8,7 @@ use slint::platform::{Platform, WindowAdapter};
 use slint::PhysicalSize;
 use std::rc::Rc;
 
-struct Offscreen(Rc<MinimalSoftwareWindow>);
+pub(crate) struct Offscreen(pub(crate) Rc<MinimalSoftwareWindow>);
 
 impl Platform for Offscreen {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
@@ -28,13 +28,35 @@ pub fn render(lib: katana_core::Library, out: &str, tab: i32, hover: Option<(f32
         let v: Vec<crate::Slot> = names
             .iter()
             .enumerate()
-            .map(|(i, l)| crate::Slot { label: (*l).into(), name: format!("Kanał {l}").into(), current: i == 0 })
+            .map(|(i, l)| crate::Slot { label: (*l).into(), name: format!("Channel {l}").into(), current: i == 0 })
             .collect();
         ui.set_slots(slint::ModelRc::new(slint::VecModel::from(v)));
         ui.set_connected(true);
     }
     if tab >= 0 {
         ui.invoke_pedal_clicked(tab); // open the inspector of pedal #tab
+    }
+    // HAZE_PAGE=1|2: Library / Setlists tab; HAZE_PICKER=1: quick preset picker window
+    if let Some(p) = std::env::var("HAZE_PAGE").ok().and_then(|v| v.parse().ok()) {
+        ui.invoke_page_picked(p);
+    }
+    if std::env::var_os("HAZE_PICKER").is_some() {
+        ui.set_show_picker(true);
+    }
+    // HAZE_LIVE=n: stage view, n songs stepped in (0 = nothing selected yet)
+    if let Some(n) = std::env::var("HAZE_LIVE").ok().and_then(|v| v.parse::<i32>().ok()) {
+        ui.set_live_open(true);
+        for _ in 0..n {
+            ui.invoke_tone_step(1);
+        }
+    }
+    // HAZE_SCALE=125: interface size (same event the settings dispatch)
+    if let Some(z) = std::env::var("HAZE_SCALE").ok().and_then(|v| v.parse::<f32>().ok()) {
+        ui.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: z / 100.0 });
+    }
+    // HAZE_ADD=i: "add to setlist" dialog for visible tone #i
+    if let Some(i) = std::env::var("HAZE_ADD").ok().and_then(|v| v.parse().ok()) {
+        ui.set_add_tone(i);
     }
     ui.show().unwrap();
     if let Some((x, y)) = hover {

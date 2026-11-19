@@ -1,7 +1,8 @@
 //! Application state and UI binding. Runs on the UI thread only.
 
-use crate::panel::{group_of, short, NodeDef, Panel, STATUS};
-use crate::{Essential, KnobVal, MainWindow, MiniKnob, NavItem, Opt, ParamRow, Pedal, Slot, ToneRow, T};
+use crate::panel::{group_of, NodeDef, Panel, STATUS};
+use crate::history::History;
+use crate::{BlockChip, Essential, PedalKnob, TemplateRow, MainWindow, NavItem, Opt, ParamRow, Pedal, Slot, ToneRow, T};
 use katana_core::chain::{self, Node, Routing, PATTERN_NAMES};
 use katana_core::map::{amp_family, amp_name, ParamRef, AMP_PANEL, PATCH_BLOCKS};
 use katana_core::patch::{Led, Patch};
@@ -23,6 +24,64 @@ enum Popup {
     Param(ParamRef),
     /// TYPE of the block open in the inspector
     Type,
+    /// audio device lists shown in the picker (value = index + 1, 0 = none / system)
+    AudioIn(Vec<haze_dsp::DeviceInfo>),
+    AudioOut(Vec<haze_dsp::DeviceInfo>),
+}
+
+/// Audio device choice, kept next to the library: `in=…`, `out=…`, `buffer=…`, `rate=…`.
+fn load_audio_cfg(root: &std::path::Path) -> haze_dsp::Config {
+    let mut c = haze_dsp::Config::default();
+    for l in std::fs::read_to_string(root.join("audio.conf")).unwrap_or_default().lines() {
+        match l.split_once('=') {
+            Some(("in", v)) if !v.is_empty() => c.input = Some(v.to_string()),
+            Some(("out", v)) if !v.is_empty() => c.output = Some(v.to_string()),
+            Some(("buffer", v)) => c.buffer = v.parse().unwrap_or(c.buffer),
+            Some(("rate", v)) => c.rate = v.parse().unwrap_or(c.rate),
+            _ => {}
+        }
+    }
+    c
+}
+
+/// Interface preferences (`ui.conf`): size in percent, library sort order.
+fn load_ui_cfg(root: &std::path::Path) -> (i32, i32) {
+    let (mut scale, mut sort) = (100, 0);
+    for l in std::fs::read_to_string(root.join("ui.conf")).unwrap_or_default().lines() {
+        match l.split_once('=') {
+            Some(("scale", v)) => scale = v.parse().ok().filter(|x| [100, 125, 150].contains(x)).unwrap_or(100),
+            Some(("sort", v)) => sort = v.parse().ok().filter(|x| (0..3).contains(x)).unwrap_or(0),
+            _ => {}
+        }
+    }
+    (scale, sort)
+}
+
+fn save_ui_cfg(root: &std::path::Path, scale: i32, sort: i32) {
+    let _ = std::fs::write(root.join("ui.conf"), format!("scale={scale}\nsort={sort}\n"));
+}
+
+fn save_audio_cfg(root: &std::path::Path, c: &haze_dsp::Config) {
+    let txt = format!(
+        "in={}\nout={}\nbuffer={}\nrate={}\n",
+        c.input.as_deref().unwrap_or(""),
+        c.output.as_deref().unwrap_or(""),
+        c.buffer,
+        c.rate
+    );
+    let _ = std::fs::write(root.join("audio.conf"), txt);
+}
+
+/// Short header label of a cpal device name.
+fn dev_label(name: Option<&str>, none: &str) -> String {
+    match name {
+        None => none.to_string(),
+        Some("default") => "System default".to_string(),
+        Some(n) => {
+            let c = n.split_once("CARD=").map_or(n, |x| x.1);
+            c.split(',').next().unwrap_or(c).to_string()
+        }
+    }
 }
 
 pub struct App {
@@ -41,6 +100,8 @@ pub struct App {
     recent: Vec<String>,
     edit: Patch,
     saved: Patch,
+    /// undo/redo of `edit`; reset when another tone (or the other A/B snapshot) comes up
+    hist: History<Patch>,
     live: Option<String>,
 
     connected: bool,
@@ -50,8 +111,6 @@ pub struct App {
     /// signal flow currently shown on the pedalboard
     layout: Vec<Node>,
     pedals: Rc<VecModel<Pedal>>,
-    /// params behind each pedal's mini knobs
-    pedal_refs: Vec<Vec<ParamRef>>,
     insp: Option<Node>,
     insp_section: usize,
     insp_rows: Vec<ParamRef>,
@@ -61,8 +120,14 @@ pub struct App {
     toast_timer: Timer,
     /// HARDWARE (Katana USB-MIDI) vs STANDALONE (PC DSP engine). Edits reach the amp only in HARDWARE.
     hw: bool,
-    /// sidebar tone tag filter: "", "clean", "crunch", "hi-gain", "ambient", "lead"
+    /// library tone filter: "", a style ("clean", "crunch", "hi-gain", "ambient", "lead")
+    /// or "#name" for a user tag
     tag: String,
+    /// library order (All / Favorites): 0 name, 1 recently edited, 2 amp
+    sort: i32,
+    /// interface size in percent, on top of the system scale `os_scale`
+    ui_scale: i32,
+    os_scale: f32,
     /// A/B compare: the snapshot not on screen, and which slot is on screen (0 = A, 1 = B)
     ab_other: Option<Patch>,
     ab_slot: i32,
@@ -77,6 +142,12 @@ pub struct App {
     meter_timer: Timer,
     meter_tick: u32,
     clip_hold: [u32; 2],
+    // ---- practice suite
+    /// looper memory handed to the current engine instance (frames), 0 = none yet
+    loop_frames: usize,
+    /// a user cabinet .wav sits in IR slot 3 and overrides the voicing's cab
+    user_ir: bool,
+    taps: Vec<std::time::Instant>,
 }
 
 fn s(x: impl AsRef<str>) -> SharedString {
@@ -148,6 +219,11 @@ impl App {
         ui.set_tones(ModelRc::from(rows.clone()));
         let pedals = Rc::new(VecModel::default());
         ui.set_pedals(ModelRc::from(pedals.clone()));
+        let audio_cfg = load_audio_cfg(lib.root());
+        ui.set_audio_buffer(audio_cfg.buffer as i32);
+        ui.set_audio_rate(audio_cfg.rate as i32);
+        ui.set_audio_input(s(dev_label(audio_cfg.input.as_deref(), "None (DI)")));
+        ui.set_audio_device(s(dev_label(audio_cfg.output.as_deref(), "System default")));
         let app = App {
             ui: ui.as_weak(),
             lib,
@@ -161,13 +237,13 @@ impl App {
             recent: Vec::new(),
             edit: Patch::default(),
             saved: Patch::default(),
+            hist: History::new(Patch::default()),
             live: None,
             connected: false,
             slot_names: vec![String::new(); 9],
             cur_slot: 255,
             layout: vec![],
             pedals,
-            pedal_refs: vec![],
             // lower deck starts on the amp, so the inspector is never an empty hole
             insp: Some(Node::Amp),
             insp_section: 0,
@@ -177,11 +253,14 @@ impl App {
             toast_timer: Timer::default(),
             hw: std::env::var_os("HAZE_PC_MODE").is_none(),
             tag: String::new(),
+            sort: 0,
+            ui_scale: 100,
+            os_scale: 1.0,
             ab_other: None,
             ab_slot: 0,
             dsp: Arc::new(haze_dsp::Params::default()),
             engine: None,
-            audio_cfg: haze_dsp::Config::default(),
+            audio_cfg,
             tuner: None,
             dsp_voicing: None,
             // no guitar plugged in is the common first run: start on the DI loop
@@ -189,17 +268,31 @@ impl App {
             meter_timer: Timer::default(),
             meter_tick: 0,
             clip_hold: [0; 2],
+            loop_frames: 0,
+            user_ir: false,
+            taps: Vec::new(),
         };
         let app = Rc::new(RefCell::new(app));
         APP.with(|a| *a.borrow_mut() = Some(app.clone()));
         bind(ui);
         let mut a = app.borrow_mut();
+        (a.ui_scale, a.sort) = load_ui_cfg(a.lib.root());
+        ui.set_ui_scale(a.ui_scale);
+        ui.set_sort(a.sort);
+        // the native window exists once the loop runs: read the system scale, then apply ours
+        Timer::single_shot(Duration::ZERO, || with_app(|a| {
+            a.os_scale = a.ui().window().scale_factor();
+            if a.ui_scale != 100 {
+                a.apply_scale();
+            }
+        }));
         let hw = a.hw;
         a.set_mode(hw);
         a.refresh_nav();
         a.refresh_list();
         a.refresh_slots();
         a.refresh_import_hint();
+        a.refresh_templates();
         if let Some(first) = a.visible.first().cloned() {
             a.select(&first);
         }
@@ -210,7 +303,7 @@ impl App {
     }
 
     /// Tones or setlists changed on disk (`haze derive`, another instance, a copied file):
-    /// reread the library and refresh the sidebar. The open editor keeps its own copy of the
+    /// reread the library and refresh the preset lists. The open editor keeps its own copy of the
     /// patch, so unsaved edits stay.
     fn reload_library(&mut self) {
         let Ok(lib) = Library::open(self.lib.root()) else { return };
@@ -222,7 +315,7 @@ impl App {
             return; // our own write echoing back
         }
         self.lib = lib;
-        eprintln!("biblioteka przeładowana: {} brzmień", self.lib.tones.len());
+        eprintln!("library reloaded: {} presets", self.lib.tones.len());
         self.refresh_nav();
         self.refresh_list();
         self.refresh_essentials();
@@ -257,22 +350,23 @@ impl App {
     fn refresh_nav(&self) {
         let fav = self.lib.tones.iter().filter(|t| t.favorite).count() as i32;
         let mut v = vec![
-            NavItem { id: s("h-lib"), name: s("BIBLIOTEKA"), count: 0, kind: 4 },
-            NavItem { id: s("all"), name: s("Wszystkie brzmienia"), count: self.lib.tones.len() as i32, kind: 0 },
-            NavItem { id: s("fav"), name: s("Ulubione"), count: fav, kind: 1 },
+            NavItem { id: s("h-lib"), name: s("LIBRARY"), count: 0, kind: 4 },
+            NavItem { id: s("all"), name: s("All presets"), count: self.lib.tones.len() as i32, kind: 0 },
+            NavItem { id: s("fav"), name: s("Favorites"), count: fav, kind: 1 },
         ];
         let sets: Vec<_> = self.lib.setlists.iter().filter(|x| x.kind == SetlistKind::Setlist).collect();
         if !sets.is_empty() {
-            v.push(NavItem { id: s("h-sets"), name: s("SETLISTY"), count: 0, kind: 4 });
+            v.push(NavItem { id: s("h-sets"), name: s("SETLISTS"), count: 0, kind: 4 });
             v.extend(sets.iter().map(|x| NavItem { id: s(&x.id), name: s(&x.name), count: x.tones.len() as i32, kind: 2 }));
         }
         let backs: Vec<_> = self.lib.setlists.iter().filter(|x| x.kind == SetlistKind::Backup).collect();
         if !backs.is_empty() {
-            v.push(NavItem { id: s("h-back"), name: s("KOPIE WZMACNIACZA"), count: 0, kind: 4 });
+            v.push(NavItem { id: s("h-back"), name: s("AMP BACKUPS"), count: 0, kind: 4 });
             v.extend(backs.iter().rev().map(|x| NavItem { id: s(&x.id), name: s(&x.name), count: x.tones.len() as i32, kind: 3 }));
         }
         self.refresh_essentials();
         let ui = self.ui();
+        ui.set_set_count(v.iter().filter(|n| n.kind == 2).count() as i32);
         ui.set_nav(ModelRc::new(VecModel::from(v)));
         ui.set_nav_selected(s(&self.nav_sel));
     }
@@ -284,6 +378,7 @@ impl App {
         let fx: Vec<String> = sm.fx_names.iter().zip(sm.leds.iter()).filter(|(_, l)| **l != Led::Off).map(|(n, _)| nice(n)).collect();
         Some(ToneRow {
             id: s(id),
+            index: self.lib.tones.iter().position(|x| x.id == id).map_or(0, |i| i as i32 + 1),
             name: s(&sm.name),
             amp: s(nice(&sm.amp)),
             fx: s(fx.join(" · ")),
@@ -302,26 +397,61 @@ impl App {
         };
         self.visible = base
             .into_iter()
-            .filter(|id| self.tag.is_empty() || self.lib.tone(id).is_some_and(|t| tone_tags(&t.patch, self.panel.amp_type).contains(&self.tag.as_str())))
+            .filter(|id| {
+                let Some(t) = self.lib.tone(id) else { return false };
+                match self.tag.strip_prefix('#') {
+                    _ if self.tag.is_empty() => true,
+                    Some(u) => t.tags.iter().any(|x| x == u),
+                    None => tone_tags(&t.patch, self.panel.amp_type).contains(&self.tag.as_str()),
+                }
+            })
             .filter(|id| {
                 if words.is_empty() {
                     return true;
                 }
                 let Some(t) = self.lib.tone(id) else { return false };
                 let sm = t.patch.summary();
-                let hay = format!("{} {} {} {}", sm.name, sm.amp, sm.fx_names.join(" "), t.origin).to_lowercase();
+                let hay = format!("{} {} {} {} {}", sm.name, sm.amp, sm.fx_names.join(" "), t.origin, t.tags.join(" ")).to_lowercase();
                 words.iter().all(|w| hay.contains(w))
             })
             .collect();
+        // setlists keep their running order; the library follows the chosen sort
+        if matches!(self.nav_sel.as_str(), "all" | "fav") {
+            let key = |id: &String| self.lib.tone(id).map(|t| (t.name.to_lowercase(), t.modified, t.patch.get(self.panel.amp_type)));
+            let mut keyed: Vec<_> = self.visible.drain(..).map(|id| (key(&id), id)).collect();
+            match self.sort {
+                1 => keyed.sort_by(|a, b| b.0.as_ref().map(|k| k.1).cmp(&a.0.as_ref().map(|k| k.1))),
+                2 => keyed.sort_by(|a, b| {
+                    let f = |k: &Option<(String, u64, i16)>| k.as_ref().map(|k| (amp_family(k.2).map_or(9, |x| x.0), k.2, k.0.clone()));
+                    f(&a.0).cmp(&f(&b.0))
+                }),
+                _ => keyed.sort_by(|a, b| a.0.as_ref().map(|k| &k.0).cmp(&b.0.as_ref().map(|k| &k.0))),
+            }
+            self.visible = keyed.into_iter().map(|(_, id)| id).collect();
+        }
         let rows: Vec<ToneRow> = self.visible.iter().filter_map(|id| self.row(id)).collect();
         self.rows.set_vec(rows);
         let title = match self.nav_sel.as_str() {
-            "all" => "Wszystkie brzmienia".to_string(),
-            "fav" => "Ulubione".to_string(),
+            "all" => "All presets".to_string(),
+            "fav" => "Favorites".to_string(),
             id => self.lib.setlists.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default(),
         };
         self.ui().set_nav_title(s(title));
+        self.refresh_user_tags();
         self.sync_selected_index();
+    }
+
+    /// Chips of the user's own tags (every tag used in the library, sorted).
+    fn refresh_user_tags(&self) {
+        let mut v: Vec<&str> = self.lib.tones.iter().flat_map(|t| t.tags.iter().map(String::as_str)).collect();
+        v.sort_unstable_by_key(|x| x.to_lowercase());
+        v.dedup();
+        self.ui().set_user_tags(ModelRc::new(VecModel::from(v.into_iter().map(s).collect::<Vec<_>>())));
+    }
+
+    fn apply_scale(&self) {
+        let f = self.os_scale * self.ui_scale as f32 / 100.0;
+        self.ui().window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: f });
     }
 
     fn sync_selected_index(&self) {
@@ -329,7 +459,7 @@ impl App {
         self.ui().set_selected_index(idx);
     }
 
-    /// Shortcut tiles in the sidebar rail: favourites, then recent tones, max 8.
+    /// Quick-access chips of the preset picker: favourites, then recent tones, max 8.
     fn refresh_essentials(&self) {
         // favourites first, then recently used, max 8 tiles
         let favs = self.lib.tones.iter().filter(|t| t.favorite);
@@ -360,6 +490,37 @@ impl App {
         self.ui().set_essentials(ModelRc::new(VecModel::from(v)));
     }
 
+    /// Starter rig cards: name, style, chain artwork (block colours in signal order, lit when on).
+    fn refresh_templates(&self) {
+        let rb = self.panel.routing_block;
+        let rows: Vec<TemplateRow> = crate::templates::TEMPLATES
+            .iter()
+            .map(|t| {
+                let p = t.build(&self.panel);
+                let rt = Routing::from_bytes(p.block(rb));
+                let blocks: Vec<BlockChip> = rt
+                    .layout()
+                    .iter()
+                    .map(|n| {
+                        let d = self.panel.node(*n);
+                        BlockChip { hue: d.hue, on: d.sw.map_or(true, |r| p.get(r) != 0), is_amp: *n == Node::Amp }
+                    })
+                    .collect();
+                TemplateRow {
+                    name: s(t.name),
+                    style: s(t.style),
+                    blurb: s(t.blurb),
+                    hue: slint::Color::from_rgb_u8((t.hue >> 16) as u8, (t.hue >> 8) as u8, t.hue as u8),
+                    amp: s(nice(&amp_name(p.get(self.panel.amp_type)))),
+                    chain: s(nice(PATTERN_NAMES[rt.pattern as usize])),
+                    fx: s(p.summary().fx_names.iter().zip(p.summary().leds.iter()).filter(|(_, l)| **l != Led::Off).map(|(n, _)| nice(n)).collect::<Vec<_>>().join(" · ")),
+                    blocks: ModelRc::new(VecModel::from(blocks)),
+                }
+            })
+            .collect();
+        self.ui().set_templates(ModelRc::new(VecModel::from(rows)));
+    }
+
     fn refresh_row(&self, id: &str) {
         self.refresh_essentials();
         if let (Some(i), Some(r)) = (self.visible.iter().position(|v| v == id), self.row(id)) {
@@ -377,6 +538,8 @@ impl App {
         self.recent.truncate(8);
         self.edit = t.patch.clone();
         self.saved = t.patch.clone();
+        self.hist.reset(self.edit.clone());
+        self.refresh_history();
         self.ab_other = None;
         self.ab_slot = 0;
         self.dsp_voicing = None;
@@ -399,6 +562,7 @@ impl App {
         ui.set_ed_name(s(&sm.name));
         ui.set_ed_origin(s(format!("{}{}", t.origin, if t.memo.is_empty() { String::new() } else { format!(" · {}", t.memo) })));
         ui.set_ed_fav(t.favorite);
+        ui.set_ed_tags(s(t.tags.join(", ")));
         ui.set_ed_dirty(self.edit != self.saved);
         ui.set_ed_live(self.live.as_deref() == Some(id.as_str()) && self.connected);
         let amp = e.get(self.panel.amp_type);
@@ -413,23 +577,6 @@ impl App {
                 ui.set_ed_amp_var(false);
             }
         }
-        let knobs: Vec<KnobVal> = self
-            .panel
-            .knobs
-            .iter()
-            .map(|k| {
-                let v = e.get(k.r);
-                KnobVal {
-                    label: s(k.label),
-                    value: v as i32,
-                    min: k.r.param.min as i32,
-                    max: k.r.param.max as i32,
-                    reset: k.r.param.init as i32,
-                    display: s(v.to_string()),
-                }
-            })
-            .collect();
-        ui.set_knobs(ModelRc::new(VecModel::from(knobs)));
         self.refresh_rig();
         self.sync_dsp();
     }
@@ -466,44 +613,45 @@ impl App {
         }
     }
 
-    fn pedal_row(&self, n: Node) -> (Pedal, Vec<ParamRef>) {
+    fn pedal_row(&self, n: Node) -> Pedal {
         let d = self.panel.node(n);
-        let refs = self.panel.pedal_knobs(d, &self.edit);
-        let knobs: Vec<MiniKnob> = refs
+        let knobs: Vec<PedalKnob> = self
+            .panel
+            .pedal_knobs(d, &self.edit)
             .iter()
             .map(|r| {
                 let v = self.edit.get(*r);
-                MiniKnob {
-                    label: s(short(r.param.name)),
-                    value: v as i32,
-                    min: r.param.min as i32,
-                    max: r.param.max as i32,
-                    display: s(r.param.label(v).map(String::from).unwrap_or_else(|| v.to_string())),
+                let span = (r.param.max - r.param.min).max(1) as f32;
+                PedalKnob {
+                    label: s(if r.param.prm == "PRM_PREAMP_A_LEVEL" { "Vol".to_string() } else { crate::panel::short(r.param.name) }),
+                    norm: ((v - r.param.min) as f32 / span).clamp(0.0, 1.0),
+                    text: s(param_text(r.param, v)),
                 }
             })
             .collect();
         let p = Pedal {
-            title: s(d.title),
-            type_name: s(self.type_name(d)),
+            title: s(nice(d.title)),
+            // blocks without a type (gate) show no subtype instead of repeating their name
+            type_name: s(if d.ty.is_none() && n != Node::Amp { String::new() } else { nice(&self.type_name(d)) }),
             on: self.node_on(d),
             has_sw: d.sw.is_some(),
             led: self.variant_sel(d).map_or(1, |c| c as i32 + 1),
             hue: d.hue,
             // silkscreen colour: dark on bright enclosures, cream on dark ones
             ink: ink_for(d.hue),
-            knobs: ModelRc::new(VecModel::from(knobs)),
             movable: chain::movable(n),
             is_amp: n == Node::Amp,
+            knobs: ModelRc::new(VecModel::from(knobs)),
+            kind: self.panel.nodes.iter().position(|x| x.node == n).unwrap_or(0) as i32,
         };
-        (p, refs)
+        p
     }
 
     fn refresh_rig(&mut self) {
         let rt = self.routing();
         self.layout = rt.layout();
-        let (rows, refs): (Vec<Pedal>, Vec<Vec<ParamRef>>) = self.layout.iter().map(|n| self.pedal_row(*n)).unzip();
+        let rows: Vec<Pedal> = self.layout.iter().map(|n| self.pedal_row(*n)).collect();
         self.pedals.set_vec(rows);
-        self.pedal_refs = refs;
         let ui = self.ui();
         ui.set_ed_chain_name(s(nice(PATTERN_NAMES[rt.pattern as usize])));
         self.refresh_fx_count();
@@ -520,13 +668,102 @@ impl App {
     }
 
     /// Re-render one pedal in place (no model reset, no repeater rebuild).
+    /// Knob on a pedal face: absolute position from a drag (`norm`), or `step` detents from the wheel.
+    fn pedal_knob(&mut self, pedal: usize, k: usize, norm: Option<f32>, step: i32) {
+        let Some(n) = self.layout.get(pedal).copied() else { return };
+        let d = self.panel.node(n);
+        let Some(r) = self.panel.pedal_knobs(d, &self.edit).get(k).copied() else { return };
+        let (min, max) = (r.param.min, r.param.max);
+        let cur = self.edit.get(r);
+        let v = match norm {
+            Some(x) => min + ((max - min) as f32 * x.clamp(0.0, 1.0)).round() as i16,
+            None => cur + step as i16 * ((max - min) / 100).max(1),
+        }
+        .clamp(min, max);
+        if v == cur {
+            return;
+        }
+        self.set_param(r, v);
+        self.refresh_pedal(n);
+        if self.insp == Some(n) {
+            let same = |x: &ParamRef| x.block == r.block && std::ptr::eq(x.param, r.param);
+            if let Some(i) = self.insp_rows.iter().position(same) {
+                let m = self.ui().get_insp_params();
+                if let Some(mut row) = m.row_data(i) {
+                    row.value = v as i32;
+                    row.display = s(param_text(r.param, v));
+                    m.set_row_data(i, row);
+                }
+            }
+        }
+        self.after_edit();
+    }
+
     fn refresh_pedal(&mut self, n: Node) {
         if let Some(i) = self.layout.iter().position(|x| *x == n) {
-            let (row, refs) = self.pedal_row(n);
+            let row = self.pedal_row(n);
             self.pedals.set_row_data(i, row);
-            self.pedal_refs[i] = refs;
         }
         self.refresh_fx_count();
+    }
+
+    /// A param of node `n` by its PRM name, among those its current type uses.
+    fn node_param(&self, n: Node, prm: &str) -> Option<ParamRef> {
+        let d = self.panel.node(n);
+        d.sections.iter().flat_map(|x| self.panel.section_params(x, &self.edit)).find(|r| r.param.prm == prm)
+    }
+
+    /// Inspector band above the knobs: EQ response curve, delay tempo sync.
+    fn refresh_extras(&self) {
+        let ui = self.ui();
+        let extra = match self.insp {
+            Some(Node::Eq) if self.insp_section == 0 => {
+                use crate::eqcurve::*;
+                let g = |prm: &str| self.node_param(Node::Eq, prm).map_or(0, |r| self.edit.get(r));
+                let geq = self.panel.node(Node::Eq).ty.is_some_and(|r| self.edit.get(r) == 1);
+                let (c, fill) = if geq {
+                    let mut b = [0f32; 10];
+                    for (i, x) in b.iter_mut().enumerate() {
+                        *x = g(&format!("PRM_EQ_GEQ_BAND{}", i + 1)) as f32;
+                    }
+                    let lv = g("PRM_EQ_GEQ_LEVEL") as f32;
+                    paths(|f| geq_db(&b, lv, f))
+                } else {
+                    let p = Para {
+                        low_cut: low_cut_index(g("PRM_EQ_LOW_CUT")),
+                        low_gain: g("PRM_EQ_LOW_GAIN") as f32,
+                        low_mid: (freq_index(g("PRM_EQ_LOWMID_FREQ")), q_index(g("PRM_EQ_LOWMID_Q")), g("PRM_EQ_LOWMID_GAIN") as f32),
+                        high_mid: (freq_index(g("PRM_EQ_HIGHMID_FREQ")), q_index(g("PRM_EQ_HIGHMID_Q")), g("PRM_EQ_HIGHMID_GAIN") as f32),
+                        high_gain: g("PRM_EQ_HIGH_GAIN") as f32,
+                        high_cut: high_cut_index(g("PRM_EQ_HIGH_CUT")),
+                        level: g("PRM_EQ_LEVEL") as f32,
+                    };
+                    paths(|f| para_db(&p, f))
+                };
+                ui.set_insp_eq_curve(s(c));
+                ui.set_insp_eq_fill(s(fill));
+                1
+            }
+            Some(n @ (Node::Delay | Node::Delay2)) if self.insp_section == 0 => {
+                ui.set_insp_delay_ms(self.node_param(n, "PRM_DLY_COMMON_DLY_TIME").map_or(0, |r| self.edit.get(r)) as i32);
+                2
+            }
+            _ => 0,
+        };
+        ui.set_insp_extra(extra);
+    }
+
+    fn delay_sync(&mut self, ms: i32) {
+        let Some(n @ (Node::Delay | Node::Delay2)) = self.insp else { return };
+        let Some(r) = self.node_param(n, "PRM_DLY_COMMON_DLY_TIME") else { return };
+        let v = (ms as i16).clamp(r.param.min, r.param.max);
+        if v as i32 != ms {
+            self.toast(format!("Delay max is {} ms: set to {v} ms", r.param.max), false);
+        }
+        self.set_param(r, v);
+        self.refresh_pedal(n);
+        self.refresh_inspector();
+        self.after_edit();
     }
 
     fn refresh_inspector(&mut self) {
@@ -538,6 +775,8 @@ impl App {
         };
         let d = self.panel.node(n);
         ui.set_insp_open(true);
+        ui.set_insp_is_amp(n == Node::Amp);
+        ui.set_insp_kind(self.panel.nodes.iter().position(|x| x.node == n).unwrap_or(0) as i32);
         ui.set_pedal_selected(self.layout.iter().position(|x| *x == n).map_or(-1, |i| i as i32));
         ui.set_insp_title(s(nice(d.title)));
         ui.set_insp_subtitle(s(nice(&self.type_name(d))));
@@ -573,8 +812,9 @@ impl App {
         // Grid layout, computed here so the UI only places cells: a flow of COLS columns where
         // knobs and switches take one cell and lists take two; a group change closes the row
         // and adds a caption.
-        const COLS: i32 = 6;
-        const CELL_H: f32 = 122.0;
+        // must match `cols` and the 92px cell of ui/inspector.slint
+        const COLS: i32 = 8;
+        const CELL_H: f32 = 108.0;
         const CAPTION_H: f32 = 40.0;
         let mut last_group = String::new();
         let (mut y, mut col) = (0f32, 0i32);
@@ -607,7 +847,7 @@ impl App {
             rows.push(ParamRow {
                 group: s(nice(&g)),
                 show_group: show,
-                name: s(nice(r.param.name)),
+                name: s(param_name(r.param)),
                 value: v as i32,
                 min: r.param.min as i32,
                 max: r.param.max as i32,
@@ -624,6 +864,7 @@ impl App {
         }
         ui.set_insp_params(ModelRc::new(VecModel::from(rows)));
         ui.set_insp_params_h(y);
+        self.refresh_extras();
     }
 
     /// Raw byte write inside a block (Patch_2 routing / colour memory), streamed live like a param.
@@ -702,12 +943,12 @@ impl App {
                 self.set_raw(rb, 0, &r2.to_bytes());
                 self.refresh_rig();
                 self.after_edit();
-                self.toast(format!("Łańcuch: {}", PATTERN_NAMES[r2.pattern as usize]), false);
+                self.toast(format!("Chain: {}", PATTERN_NAMES[r2.pattern as usize]), false);
             }
             Some(_) => {}
             None => {
                 if gap != from && gap != from + 1 {
-                    self.toast("Tej kolejności Katana nie obsługuje", true);
+                    self.toast("The Katana can't run blocks in this order", true);
                 }
             }
         }
@@ -759,21 +1000,39 @@ impl App {
         self.stop_engine();
         self.sync_dsp();
         self.dsp.set(haze_dsp::P::Source, self.di_on as i32 as f32);
-        match haze_dsp::Engine::start(self.dsp.clone(), &self.audio_cfg) {
+        let mut res = haze_dsp::Engine::start(self.dsp.clone(), &self.audio_cfg);
+        if let (Err(err), Some(want)) = (&res, self.audio_cfg.input.clone()) {
+            // input gone (unplugged / busy): keep the app usable on the DI player
+            self.toast(format!("Input {want}: {err} — playing DI"), true);
+            let mut cfg = self.audio_cfg.clone();
+            cfg.input = None;
+            res = haze_dsp::Engine::start(self.dsp.clone(), &cfg);
+        }
+        match res {
             Ok(e) => {
                 let ui = self.ui();
                 ui.set_audio_host(s(&e.info.host));
-                ui.set_audio_device(s(e.info.output.split(',').next().unwrap_or("default")));
+                ui.set_audio_device(s(dev_label(self.audio_cfg.output.as_deref(), "System default")));
+                ui.set_audio_input(s(dev_label(e.info.input.as_deref(), "None (DI)")));
                 ui.set_audio_latency(e.info.latency_ms);
                 ui.set_audio_running(true);
-                if e.info.input.is_none() {
-                    self.toast("Brak wejścia audio: gra odtwarzacz DI", false);
+                if e.info.input.is_none() && !self.di_on {
+                    self.set_di(true);
                 }
                 self.tuner = Some(haze_dsp::Tuner::new(e.fs()));
                 self.engine = Some(e);
+                // a fresh chain: looper memory and the user IR went with the old one
+                self.loop_frames = 0;
+                self.user_ir = false;
+                self.sync_dsp();
+                ui.set_ir_name(s("built-in (per amp)"));
+                ui.set_di_name(s("built-in riff"));
+                if ui.get_practice_open() {
+                    self.ensure_loop_buffer();
+                }
                 self.meter_timer.start(TimerMode::Repeated, Duration::from_millis(33), || with_app(|a| a.meter_frame()));
             }
-            Err(e) => self.toast(format!("Silnik audio: {e}"), true),
+            Err(e) => self.toast(format!("Audio engine: {e}"), true),
         }
     }
 
@@ -799,8 +1058,15 @@ impl App {
             fresh.push(x);
         }
         let ui = self.ui();
-        // meter ballistics: instant rise, ~300 ms fall
-        let fall = |cur: f32, new: f32| if new > cur { new } else { cur * 0.82 };
+        // minimised: keep the queues drained, skip the pitch maths and every property write
+        if ui.window().is_minimized() {
+            let _ = haze_dsp::Meters::take_peak(&m.in_peak);
+            let _ = haze_dsp::Meters::take_peak(&m.out_peak);
+            return;
+        }
+        // meter ballistics: instant rise, ~300 ms fall; snaps to 0 so a silent meter stops
+        // changing (an endless geometric decay would repaint the bar every frame)
+        let fall = |cur: f32, new: f32| if new > cur { new } else if cur < 0.002 { 0.0 } else { cur * 0.82 };
         ui.set_in_level(fall(ui.get_in_level(), haze_dsp::Meters::take_peak(&m.in_peak)));
         ui.set_out_level(fall(ui.get_out_level(), haze_dsp::Meters::take_peak(&m.out_peak)));
         for (i, flag) in [&m.in_clip, &m.out_clip].into_iter().enumerate() {
@@ -812,6 +1078,18 @@ impl App {
         ui.set_in_clip(self.clip_hold[0] > 0);
         ui.set_out_clip(self.clip_hold[1] > 0);
         self.meter_tick = self.meter_tick.wrapping_add(1);
+        if ui.get_practice_open() {
+            use std::sync::atomic::Ordering::Relaxed;
+            let st = m.loop_state.load(Relaxed) as i32;
+            let (pos, len) = (m.loop_pos.load(Relaxed) as f32, m.loop_len.load(Relaxed) as f32);
+            let fs = self.engine.as_ref().map_or(48000.0, |e| e.fs());
+            ui.set_loop_state(st);
+            // recording fills the memory, playback sweeps the loop
+            let (prog, secs) = if st == 1 { (len / self.loop_frames.max(1) as f32, len / fs) } else if len > 0.0 { (pos / len, len / fs) } else { (0.0, 0.0) };
+            ui.set_loop_progress(prog);
+            ui.set_loop_time(s(format!("{secs:.1} s")));
+            ui.set_drum_step(m.drum_step.load(Relaxed) as i32);
+        }
         if let Some(t) = self.tuner.as_mut() {
             for x in fresh {
                 t.push(x);
@@ -839,6 +1117,115 @@ impl App {
             }
         }
         self.ui().set_di_on(on);
+    }
+
+    // ------------------------------------------------------------------ practice suite
+
+    /// Looper memory: 60 s stereo + one overdub layer. Zeroed pages come from calloc, so RSS
+    /// grows only with what actually gets recorded. Allocated on first use, never per frame.
+    fn ensure_loop_buffer(&mut self) {
+        let Some(e) = self.engine.as_mut() else { return };
+        if self.loop_frames > 0 {
+            return;
+        }
+        let frames = (e.fs() * 60.0) as usize;
+        let buf = vec![0f32; frames * 4].into_boxed_slice();
+        if e.send(haze_dsp::Cmd::SetLoopBuffer(buf)) {
+            self.loop_frames = frames;
+        }
+    }
+
+    fn loop_action(&mut self, a: i32) {
+        use haze_dsp::LoopAction::*;
+        self.ensure_loop_buffer();
+        let act = match a {
+            0 => Cycle,
+            1 => Stop,
+            2 => Play,
+            3 => Undo,
+            _ => Clear,
+        };
+        if let Some(e) = self.engine.as_mut() {
+            e.send(haze_dsp::Cmd::Loop(act));
+        }
+    }
+
+    fn set_bpm(&mut self, bpm: i32) {
+        let bpm = bpm.clamp(40, 240);
+        self.dsp.set(haze_dsp::P::Bpm, bpm as f32);
+        self.ui().set_bpm(bpm);
+    }
+
+    /// Tap tempo: average of the last taps (reset after 2 s). Sets the drum BPM and the delay
+    /// to a quarter note; the delay TIME is written into the patch, so the Katana follows when live.
+    fn tap(&mut self) {
+        let now = std::time::Instant::now();
+        if self.taps.last().is_some_and(|t| now.duration_since(*t).as_secs_f32() > 2.0) {
+            self.taps.clear();
+        }
+        self.taps.push(now);
+        if self.taps.len() > 5 {
+            self.taps.remove(0);
+        }
+        if self.taps.len() < 2 {
+            return;
+        }
+        let span = now.duration_since(self.taps[0]).as_secs_f32() / (self.taps.len() - 1) as f32;
+        let bpm = (60.0 / span).round() as i32;
+        self.set_bpm(bpm);
+        let ms = 60000.0 / bpm.clamp(40, 240) as f32;
+        if let Some(e) = self.engine.as_mut() {
+            e.send(haze_dsp::Cmd::DrumsRestart);
+        }
+        let node = self.panel.node(Node::Delay);
+        let r = self.panel.section_params(&node.sections[0], &self.edit).into_iter().find(|r| r.param.name.contains("TIME"));
+        match r {
+            Some(r) if self.sel.is_some() => {
+                let (lo, hi) = (r.param.min as f32, r.param.max as f32);
+                let v = if r.param.max >= 1000 { ms } else { lo + (ms - 20.0) / 1980.0 * (hi - lo) };
+                self.set_param(r, v.round().clamp(lo, hi) as i16);
+                self.after_edit();
+                if self.insp == Some(Node::Delay) {
+                    self.refresh_inspector();
+                }
+            }
+            _ => self.dsp.set(haze_dsp::P::DelayMs, ms),
+        }
+        self.toast(format!("TAP {bpm} BPM · delay {ms:.0} ms"), false);
+    }
+
+    fn load_wav(&mut self, path: &str, ir: bool) {
+        let path = path.trim().trim_matches(|c| c == '\'' || c == '"');
+        let path = std::path::Path::new(path);
+        let Some(e) = self.engine.as_mut() else {
+            self.toast("Switch to Standalone mode first (PC engine)", true);
+            return;
+        };
+        let fs = e.fs();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let res = if ir {
+            haze_dsp::conv::load_wav(path, fs, Some(8192)).map(|x| {
+                let spec = haze_dsp::conv::IrSpectrum::new(&x, name.clone());
+                e.send(haze_dsp::Cmd::SetIr(3, Box::new(spec)))
+            })
+        } else {
+            haze_dsp::conv::load_wav(path, fs, Some(fs as usize * 300)).map(|x| e.send(haze_dsp::Cmd::SetDi(Box::new(x))))
+        };
+        match res {
+            Ok(true) if ir => {
+                self.user_ir = true;
+                self.sync_dsp();
+                self.ui().set_ir_name(s(&name));
+                self.toast(format!("Cab IR: {name}"), false);
+            }
+            Ok(true) => {
+                self.ui().set_di_name(s(&name));
+                self.set_di(true);
+                self.toast(format!("DI: {name}"), false);
+            }
+            Ok(false) => self.toast("Engine busy, try again", true),
+            Err(err) => self.toast(format!("{name}: {err}"), true),
+        }
     }
 
     /// Mirror the edited Katana patch into the PC engine's parameters (cheap: atomics only).
@@ -874,7 +1261,7 @@ impl App {
             _ => 1,
         });
         d.set(P::AmpVoicing, voicing as f32);
-        d.set(P::CabIr, match voicing { 0 => 0.0, 1 | 2 => 1.0, _ => 2.0 });
+        d.set(P::CabIr, if self.user_ir { 3.0 } else { match voicing { 0 => 0.0, 1 | 2 => 1.0, _ => 2.0 } });
         d.set(P::AmpSag, if voicing >= 3 { 0.45 } else { 0.25 });
 
         // pedals: on/off, type, and the knobs found by name in the first section
@@ -979,7 +1366,7 @@ impl App {
         match self.ab_other.as_mut() {
             None => {
                 self.ab_other = Some(self.edit.clone());
-                self.toast("B = kopia A. Zmieniaj B, porównuj klawiszem A/B", false);
+                self.toast("B is a copy of A. Edit B, compare with A/B", false);
             }
             Some(other) => {
                 std::mem::swap(&mut self.edit, other);
@@ -989,17 +1376,78 @@ impl App {
             }
         }
         self.ab_slot = slot;
+        self.hist.reset(self.edit.clone());
         self.refresh_ab();
         self.refresh_editor();
         self.after_edit();
     }
 
     fn after_edit(&mut self) {
+        if matches!(self.insp, Some(Node::Eq | Node::Delay | Node::Delay2)) {
+            self.refresh_extras();
+        }
+        self.hist.commit(&self.edit, std::time::Instant::now());
+        self.refresh_history();
         self.sync_dsp();
         let ui = self.ui();
         ui.set_ed_dirty(self.edit != self.saved);
         if let Some(id) = self.sel.clone() {
             self.refresh_row(&id);
+        }
+    }
+
+    /// Append a tone to a setlist; an empty `set` id makes a new setlist holding just this tone.
+    fn add_to_setlist(&mut self, tid: &str, set: &str) {
+        if set.is_empty() {
+            let n = self.lib.setlists.iter().filter(|x| x.kind == SetlistKind::Setlist).count() + 1;
+            let name = format!("Setlist {n}");
+            match self.lib.add_setlist(&name, SetlistKind::Setlist, vec![tid.to_string()]) {
+                Ok(_) => {
+                    self.refresh_nav();
+                    self.toast(format!("Added to new setlist “{name}”"), false);
+                }
+                Err(e) => self.toast(e.to_string(), true),
+            }
+            return;
+        }
+        let Some(sl) = self.lib.setlists.iter().find(|x| x.id == set) else { return };
+        if sl.tones.iter().any(|t| t == tid) {
+            self.toast(format!("Already in “{}”", sl.name), false);
+            return;
+        }
+        let name = sl.name.clone();
+        if let Err(e) = self.lib.update_setlist(set, |x| x.tones.push(tid.to_string())) {
+            self.toast(e.to_string(), true);
+            return;
+        }
+        self.refresh_nav();
+        if self.nav_sel == set {
+            self.refresh_list();
+        }
+        self.toast(format!("Added to “{name}”"), false);
+    }
+
+    fn refresh_history(&self) {
+        let ui = self.ui();
+        ui.set_can_undo(self.hist.can_undo());
+        ui.set_can_redo(self.hist.can_redo());
+    }
+
+    /// Undo (`redo == false`) or redo one edit step: the whole patch comes back, the amp gets it in one go.
+    fn history_step(&mut self, redo: bool) {
+        if self.sel.is_none() {
+            return;
+        }
+        let got = if redo { self.hist.redo(&self.edit) } else { self.hist.undo(&self.edit) };
+        let Some(p) = got else { return };
+        self.edit = p;
+        if self.is_live() {
+            self.dev.send(Cmd::Audition(Box::new(self.edit.clone())));
+        }
+        self.refresh_editor();
+        self.after_edit();
+        if self.insp.is_some() {
+            self.refresh_inspector();
         }
     }
 
@@ -1015,10 +1463,10 @@ impl App {
     fn refresh_import_hint(&self) {
         let dirs = find_bts_dirs();
         let hint = if dirs.is_empty() {
-            "Nie widzę zamontowanej partycji Windows z BOSS Tone Studio. Zamontuj ją (np. udisksctl mount -b /dev/nvme0n1p3) albo wskaż plik .tsl / folder poniżej.".to_string()
+            "No mounted Windows partition with BOSS Tone Studio found. Mount it (e.g. udisksctl mount -b /dev/nvme0n1p3) or enter a .tsl file / folder below.".to_string()
         } else {
             format!(
-                "Znaleziono bibliotekę BOSS Tone Studio:\n{}\nImport jest idempotentny — duplikaty są scalane, ponowny import niczego nie podwaja.",
+                "Found a BOSS Tone Studio library:\n{}\nImport is idempotent: duplicates are merged, importing again never doubles anything.",
                 dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n")
             )
         };
@@ -1042,14 +1490,14 @@ impl App {
                 self.connected = true;
                 let ui = self.ui();
                 ui.set_connected(true);
-                ui.set_conn_text(s("połączony przez USB"));
-                self.toast("Połączono z KATANA MkII", false);
+                ui.set_conn_text(s("Online"));
+                self.toast("Connected to Katana MkII", false);
             }
             Event::Disconnected(why) => {
                 self.connected = false;
                 let ui = self.ui();
                 ui.set_connected(false);
-                ui.set_conn_text(s("niepodłączony"));
+                ui.set_conn_text(s("Offline"));
                 self.busy("", -1.0);
                 self.refresh_slots();
                 self.toast(why, true);
@@ -1087,11 +1535,11 @@ impl App {
                                 self.refresh_nav();
                             }
                             Err(err) => {
-                                self.toast(format!("Kopia {label} nieudana: {err} — zapis przerwany"), true);
+                                self.toast(format!("Backup of {label} failed: {err} — write aborted"), true);
                                 return;
                             }
                         }
-                        self.toast(format!("Kopia {label} zrobiona. Zapisuję „{wname}”…"), false);
+                        self.toast(format!("{label} backed up. Writing “{wname}”…"), false);
                         self.dev.send(Cmd::WriteSlot { slot, patch: Box::new(wp) });
                         return;
                     }
@@ -1099,7 +1547,7 @@ impl App {
                 }
                 match self.lib.add_patch(*p, &format!("AMP · {label}"), "") {
                     Ok((id, new)) => {
-                        self.toast(if new { format!("Kanał {label} dodany do biblioteki") } else { format!("Kanał {label} już jest w bibliotece") }, false);
+                        self.toast(if new { format!("Channel {label} added to the library") } else { format!("Channel {label} is already in the library") }, false);
                         self.nav_sel = "all".into();
                         self.refresh_nav();
                         self.refresh_list();
@@ -1119,12 +1567,13 @@ impl App {
                         new += n as usize;
                     }
                 }
-                match self.lib.add_setlist(&format!("Wzmacniacz · {stamp}"), SetlistKind::Backup, ids) {
+                match self.lib.add_setlist(&format!("Amp backup · {stamp}"), SetlistKind::Backup, ids) {
                     Ok(id) => {
                         self.nav_sel = id;
+                        self.ui().set_page(2);
                         self.refresh_nav();
                         self.refresh_list();
-                        self.toast(format!("Kopia 9 kanałów zapisana ({new} nowych brzmień)"), false);
+                        self.toast(format!("All 9 channels backed up ({new} new presets)"), false);
                     }
                     Err(err) => self.toast(err.to_string(), true),
                 }
@@ -1133,9 +1582,9 @@ impl App {
                 self.busy("", -1.0);
                 let label = SLOT_LABELS[slot as usize];
                 if verified {
-                    self.toast(format!("Zapisano w {label} i zweryfikowano odczytem ✓"), false);
+                    self.toast(format!("Written to {label}, verified by read-back ✓"), false);
                 } else {
-                    self.toast(format!("Zapis w {label}: odczyt kontrolny się różni!"), true);
+                    self.toast(format!("Write to {label}: read-back differs!"), true);
                 }
             }
             Event::Error(err) => {
@@ -1171,11 +1620,11 @@ impl App {
         };
         match res {
             Ok(r) => {
-                self.toast(format!("Import: {} setlist, {} patchy, {} nowych brzmień, {} duplikatów scalonych", r.setlists, r.patches, r.new_tones, r.duplicates), false);
+                self.toast(format!("Import: {} setlists, {} patches, {} new presets, {} duplicates merged", r.setlists, r.patches, r.new_tones, r.duplicates), false);
                 self.refresh_nav();
                 self.refresh_list();
             }
-            Err(e) => self.toast(format!("Import nieudany: {e}"), true),
+            Err(e) => self.toast(format!("Import failed: {e}"), true),
         }
     }
 
@@ -1184,8 +1633,8 @@ impl App {
         let path = dir.join(format!("{}.tsl", safe_file_name(name)));
         let r = std::fs::create_dir_all(&dir).and_then(|_| self.lib.export_tsl(name, &ids, &path));
         match r {
-            Ok(()) => self.toast(format!("Zapisano {}", path.display()), false),
-            Err(e) => self.toast(format!("Eksport nieudany: {e}"), true),
+            Ok(()) => self.toast(format!("Saved {}", path.display()), false),
+            Err(e) => self.toast(format!("Export failed: {e}"), true),
         }
     }
 }
@@ -1250,6 +1699,16 @@ fn is_switch(d: &katana_core::map::ParamDef) -> bool {
     d.labels.is_empty() && d.min == 0 && d.max == 1
 }
 
+/// Inspector label of a parameter. One name per concept across the app: the preamp
+/// output is "Volume" (as on the amp's panel), the solo switch is "Solo Boost".
+fn param_name(d: &katana_core::map::ParamDef) -> String {
+    match d.prm {
+        "PRM_PREAMP_A_LEVEL" => "Volume".into(),
+        _ if d.name == "SOLO SW" => "Solo Boost".into(),
+        _ => nice(&d.name.replace('_', " ")),
+    }
+}
+
 fn param_text(d: &katana_core::map::ParamDef, v: i16) -> String {
     if is_switch(d) {
         return if v != 0 { "ON".into() } else { "OFF".into() };
@@ -1275,8 +1734,8 @@ fn param_text(d: &katana_core::map::ParamDef, v: i16) -> String {
     if let Some(s) = table.and_then(|t| t.get(v as usize)) {
         return s.to_string();
     }
-    // gains in dB get a sign
-    if d.prm.contains("GAIN") || d.prm.contains("_GEQ_") || d.prm == "PRM_EQ_LEVEL" {
+    // EQ gains in dB get a sign; the preamp GAIN is a plain 0–120 knob position
+    if (d.prm.contains("GAIN") && !d.prm.starts_with("PRM_PREAMP_")) || d.prm.contains("_GEQ_") || d.prm == "PRM_EQ_LEVEL" {
         return format!("{v:+} dB").replace("+0 dB", "0 dB");
     }
     v.to_string()
@@ -1353,23 +1812,6 @@ fn bind(ui: &MainWindow) {
             a.ui().set_ed_fav(fav);
         }
     }));
-    ui.on_knob_changed(|i, v| with_app(|a| {
-        let Some(k) = a.panel.knobs.get(i as usize) else { return };
-        let r = k.r;
-        if a.edit.get(r) == v as i16 {
-            return;
-        }
-        a.set_param(r, v as i16);
-        // update only the touched knob model row — no full editor rebuild per drag step
-        let ui = a.ui();
-        let m = ui.get_knobs();
-        if let Some(mut row) = m.row_data(i as usize) {
-            row.value = v;
-            row.display = s(v.to_string());
-            m.set_row_data(i as usize, row);
-        }
-        a.after_edit();
-    }));
     ui.on_amp_family(|f| with_app(|a| {
         a.dsp_voicing = None;
         let var = a.ui().get_ed_amp_var();
@@ -1393,32 +1835,17 @@ fn bind(ui: &MainWindow) {
     }));
     ui.on_pedal_clicked(|i| with_app(|a| {
         let Some(n) = a.layout.get(i as usize).copied() else { return };
-        if a.insp == Some(n) {
-            a.insp = None;
-        } else {
+        // the inspector always shows a block: clicking the open one keeps it (and its tab)
+        if a.insp != Some(n) {
             a.insp = Some(n);
             a.insp_section = 0;
+            a.refresh_inspector();
         }
-        a.refresh_inspector();
     }));
     ui.on_pedal_toggled(|i| with_app(|a| {
         let Some(n) = a.layout.get(i as usize).copied() else { return };
         let on = a.node_on(a.panel.node(n));
         a.set_node_on(n, !on);
-    }));
-    ui.on_pedal_knob(|i, k, v| with_app(|a| {
-        let (i, k) = (i as usize, k as usize);
-        let Some(r) = a.pedal_refs.get(i).and_then(|x| x.get(k)).copied() else { return };
-        if a.edit.get(r) == v as i16 {
-            return;
-        }
-        a.set_param(r, v as i16);
-        let n = a.layout[i];
-        a.refresh_pedal(n);
-        if a.insp == Some(n) {
-            a.refresh_inspector();
-        }
-        a.after_edit();
     }));
     ui.on_pedal_drag_start(|i| with_app(|a| {
         let ok = a.routing().valid_gaps(i as usize);
@@ -1428,10 +1855,6 @@ fn bind(ui: &MainWindow) {
         // defer: the pedal component that fired this is about to be rebuilt
         Timer::single_shot(Duration::ZERO, move || with_app(|a| a.drop_pedal(from as usize, gap as usize)));
     });
-    ui.on_insp_close(|| with_app(|a| {
-        a.insp = None;
-        a.refresh_inspector();
-    }));
     ui.on_insp_toggle(|on| with_app(|a| {
         if let Some(n) = a.insp {
             a.set_node_on(n, on);
@@ -1460,7 +1883,7 @@ fn bind(ui: &MainWindow) {
         };
         a.popup = Some(Popup::Param(r));
         let ui = a.ui();
-        ui.set_popup_title(s(format!("{} · {}", group_of(r.param), r.param.name)));
+        ui.set_popup_title(s(format!("{} · {}", group_of(r.param), param_name(r.param))));
         ui.set_popup_options(ModelRc::new(VecModel::from(opts)));
         ui.invoke_open_popup();
     }));
@@ -1476,6 +1899,31 @@ fn bind(ui: &MainWindow) {
                     a.set_node_type(n, v as i16);
                 }
             }
+            Some(Popup::AudioIn(list)) => {
+                let d = if v == 0 { None } else { list.get(v as usize - 1).cloned() };
+                a.audio_cfg.input = d.as_ref().map(|d| d.id.clone());
+                save_audio_cfg(a.lib.root(), &a.audio_cfg);
+                a.ui().set_audio_input(s(dev_label(a.audio_cfg.input.as_deref(), "None (DI)")));
+                match &d {
+                    Some(d) if d.mic => a.toast(format!("{}: looks like a microphone — expect feedback on speakers. Use headphones!", d.label), true),
+                    Some(d) => a.toast(format!("Guitar input: {}", d.label), false),
+                    None => a.toast("No input: DI player only", false),
+                }
+                if d.is_some() && a.di_on {
+                    a.set_di(false);
+                }
+                if a.engine.is_some() {
+                    a.start_engine();
+                }
+            }
+            Some(Popup::AudioOut(list)) => {
+                a.audio_cfg.output = if v == 0 { None } else { list.get(v as usize - 1).map(|d| d.id.clone()) };
+                save_audio_cfg(a.lib.root(), &a.audio_cfg);
+                a.ui().set_audio_device(s(dev_label(a.audio_cfg.output.as_deref(), "System default")));
+                if a.engine.is_some() {
+                    a.start_engine();
+                }
+            }
             None => {}
         }
     }));
@@ -1483,10 +1931,12 @@ fn bind(ui: &MainWindow) {
         let Some(n) = a.insp else { return };
         a.popup = Some(Popup::Type);
         let ui = a.ui();
-        ui.set_popup_title(s(format!("{} — typ", a.panel.node(n).title)));
+        ui.set_popup_title(s(format!("{} — type", a.panel.node(n).title)));
         ui.set_popup_options(ui.get_insp_types());
         ui.invoke_open_popup();
     }));
+    ui.on_pedal_knob_set(|i, k, x| with_app(|a| a.pedal_knob(i as usize, k as usize, Some(x), 0)));
+    ui.on_pedal_knob_step(|i, k, d| with_app(|a| a.pedal_knob(i as usize, k as usize, None, d)));
     ui.on_insp_param(|i, v| with_app(|a| {
         let Some(r) = a.insp_rows.get(i as usize).copied() else { return };
         if a.edit.get(r) == v as i16 {
@@ -1521,10 +1971,24 @@ fn bind(ui: &MainWindow) {
     ui.on_audition(|| with_app(audition));
     ui.on_mode_picked(|hw| with_app(|a| {
         a.set_mode(hw);
-        a.toast(if hw { "Tryb HARDWARE: edycja synchronizuje Katanę" } else { "Tryb STANDALONE: silnik PC DSP (w budowie), Katana nie dostaje zmian" }, false);
+        a.toast(if hw { "Hardware mode: edits sync to the Katana" } else { "Standalone mode: PC DSP engine (beta), the Katana gets no edits" }, false);
+    }));
+    ui.on_audio_device_request(|input| with_app(|a| {
+        let list: Vec<haze_dsp::DeviceInfo> = haze_dsp::list_devices(input).into_iter().filter(|d| input || d.id != "default").collect();
+        let mut opts = vec![Opt { value: 0, label: s(if input { "— None (DI player only)" } else { "System default (PipeWire)" }) }];
+        for (i, d) in list.iter().enumerate() {
+            let warn = if d.mic { "   ⚠ microphone" } else { "" };
+            opts.push(Opt { value: i as i32 + 1, label: s(format!("{}{warn}", d.label)) });
+        }
+        a.popup = Some(if input { Popup::AudioIn(list) } else { Popup::AudioOut(list) });
+        let ui = a.ui();
+        ui.set_popup_title(s(if input { "Guitar input" } else { "Audio output" }));
+        ui.set_popup_options(ModelRc::new(VecModel::from(opts)));
+        ui.invoke_open_popup();
     }));
     ui.on_audio_buffer_picked(|b| with_app(|a| {
         a.audio_cfg.buffer = b as u32;
+        save_audio_cfg(a.lib.root(), &a.audio_cfg);
         a.ui().set_audio_buffer(b);
         if a.engine.is_some() {
             a.start_engine();
@@ -1532,6 +1996,7 @@ fn bind(ui: &MainWindow) {
     }));
     ui.on_audio_rate_picked(|r| with_app(|a| {
         a.audio_cfg.rate = r as u32;
+        save_audio_cfg(a.lib.root(), &a.audio_cfg);
         a.ui().set_audio_rate(r);
         if a.engine.is_some() {
             a.start_engine();
@@ -1543,16 +2008,188 @@ fn bind(ui: &MainWindow) {
     }));
     ui.on_di_toggled(|on| with_app(|a| a.set_di(on)));
     ui.on_transport(|| with_app(|a| {
-        if !a.hw {
+        if a.hw {
+            return;
+        }
+        if a.ui().get_practice_open() {
+            a.loop_action(0);
+        } else {
             let on = !a.di_on;
             a.set_di(on);
         }
     }));
+    ui.on_practice_toggled(|open| with_app(|a| {
+        if open {
+            a.ensure_loop_buffer();
+        }
+    }));
+    ui.on_loop_action(|x| with_app(|a| a.loop_action(x)));
+    ui.on_drum_toggled(|on| with_app(|a| {
+        a.dsp.set(haze_dsp::P::DrumOn, on as i32 as f32);
+        a.ui().set_drum_on(on);
+    }));
+    ui.on_drum_pattern_picked(|i| with_app(|a| {
+        a.dsp.set(haze_dsp::P::DrumPattern, i as f32);
+        a.ui().set_drum_pattern(i);
+    }));
+    ui.on_bpm_changed(|b| with_app(|a| a.set_bpm(b)));
+    ui.on_tap(|| with_app(|a| a.tap()));
+    ui.on_load_ir(|p| with_app(|a| a.load_wav(&p, true)));
+    ui.on_load_di(|p| with_app(|a| a.load_wav(&p, false)));
+    // screenshots / debugging: start with the practice drawer open
+    if std::env::var_os("HAZE_PRACTICE").is_some() {
+        ui.set_practice_open(true);
+    }
     ui.on_dsp_voicing_picked(|v| with_app(|a| {
         a.dsp_voicing = Some(v);
         a.sync_dsp();
     }));
     ui.on_ab_picked(|i| with_app(|a| a.ab_pick(i)));
+    // Pages: Library shows All / Favorites, Setlists shows one collection (the first by default,
+    // "" when there is none). The Rig page keeps whatever collection the picker browses.
+    ui.on_page_picked(|page| with_app(|a| {
+        let in_set = a.nav_sel != "all" && a.nav_sel != "fav";
+        match page {
+            1 if in_set => a.nav_sel = "all".into(),
+            2 if !in_set || a.nav_sel.is_empty() => {
+                let sets = a.lib.setlists.iter();
+                let first = sets.clone().find(|x| x.kind != SetlistKind::Backup).or_else(|| sets.clone().next());
+                a.nav_sel = first.map(|x| x.id.clone()).unwrap_or_default();
+            }
+            _ => {}
+        }
+        a.ui().set_nav_selected(s(&a.nav_sel));
+        a.ui().set_page(page);
+        a.refresh_list();
+    }));
+    // ◀ ▶ in the preset header: step through the presets of the current collection
+    ui.on_tone_step(|d| with_app(|a| {
+        if a.visible.is_empty() {
+            return;
+        }
+        let n = a.visible.len() as i32;
+        let cur = a.sel.as_ref().and_then(|id| a.visible.iter().position(|v| v == id)).map_or(if d > 0 { -1 } else { n }, |i| i as i32);
+        let next = (cur + d).rem_euclid(n) as usize;
+        let id = a.visible[next].clone();
+        a.select(&id);
+        if a.connected {
+            audition(a);
+        }
+    }));
+    // ---------------------------------------------------------------- setlist editing
+    // Rows are addressed by their position in the visible list; the setlist itself is edited
+    // by tone id, so a search or tag filter never scrambles the stored order.
+    ui.on_set_new(|| with_app(|a| {
+        let n = a.lib.setlists.iter().filter(|x| x.kind == SetlistKind::Setlist).count() + 1;
+        match a.lib.add_setlist(&format!("Setlist {n}"), SetlistKind::Setlist, vec![]) {
+            Ok(id) => {
+                a.nav_sel = id;
+                a.ui().set_nav_selected(s(&a.nav_sel));
+                a.refresh_nav();
+                a.refresh_list();
+            }
+            Err(e) => a.toast(e.to_string(), true),
+        }
+    }));
+    ui.on_set_rename(|name| with_app(|a| {
+        let name = name.trim().to_string();
+        let id = a.nav_sel.clone();
+        if name.is_empty() || !a.lib.setlists.iter().any(|x| x.id == id) {
+            return;
+        }
+        if let Err(e) = a.lib.update_setlist(&id, |x| x.name = name) {
+            a.toast(e.to_string(), true);
+        }
+        a.refresh_nav();
+        a.refresh_list();
+    }));
+    ui.on_set_add_current(|| with_app(|a| {
+        let (Some(tid), id) = (a.sel.clone(), a.nav_sel.clone()) else { return };
+        a.add_to_setlist(&tid, &id);
+    }));
+    ui.on_tone_add_to(|i, set| with_app(|a| {
+        let Some(tid) = a.visible.get(i as usize).cloned() else { return };
+        a.add_to_setlist(&tid, &set);
+    }));
+    ui.on_song_move(|i, d| with_app(|a| {
+        let id = a.nav_sel.clone();
+        let Some(tid) = a.visible.get(i as usize).cloned() else { return };
+        let r = a.lib.update_setlist(&id, |x| {
+            if let Some(k) = x.tones.iter().position(|t| *t == tid) {
+                let j = k as i32 + d;
+                if j >= 0 && (j as usize) < x.tones.len() {
+                    x.tones.swap(k, j as usize);
+                }
+            }
+        });
+        if let Err(e) = r {
+            a.toast(e.to_string(), true);
+        }
+        a.refresh_list();
+    }));
+    ui.on_song_remove(|i| with_app(|a| {
+        let id = a.nav_sel.clone();
+        let Some(tid) = a.visible.get(i as usize).cloned() else { return };
+        if let Err(e) = a.lib.update_setlist(&id, |x| {
+            if let Some(k) = x.tones.iter().position(|t| *t == tid) {
+                x.tones.remove(k);
+            }
+        }) {
+            a.toast(e.to_string(), true);
+        }
+        a.refresh_nav();
+        a.refresh_list();
+    }));
+    // Starter rigs: copy the template into the library and open it on the rig
+    ui.on_template_use(|i| with_app(|a| {
+        let Some(t) = crate::templates::TEMPLATES.get(i as usize) else { return };
+        let p = t.build(&a.panel);
+        match a.lib.add_patch(p, "Haze starter rig", t.blurb) {
+            Ok((id, new)) => {
+                a.nav_sel = "all".into();
+                a.ui().set_nav_selected(s("all"));
+                a.refresh_nav();
+                a.refresh_list();
+                a.select(&id);
+                a.ui().set_page(0);
+                if a.connected {
+                    audition(a);
+                }
+                a.toast(if new { format!("“{}” added to your library", t.name) } else { format!("“{}” is already in your library", t.name) }, false);
+            }
+            Err(e) => a.toast(e.to_string(), true),
+        }
+    }));
+    ui.on_sort_picked(|v| with_app(|a| {
+        a.sort = v;
+        a.ui().set_sort(v);
+        save_ui_cfg(a.lib.root(), a.ui_scale, a.sort);
+        a.refresh_list();
+    }));
+    ui.on_ui_scale_picked(|v| with_app(|a| {
+        a.ui_scale = v;
+        a.ui().set_ui_scale(v);
+        save_ui_cfg(a.lib.root(), a.ui_scale, a.sort);
+        a.apply_scale();
+    }));
+    ui.on_set_tags(|t| with_app(|a| {
+        let Some(id) = a.sel.clone() else { return };
+        let mut tags: Vec<String> = t.split(',').map(|x| x.trim().trim_start_matches('#').to_string()).filter(|x| !x.is_empty()).collect();
+        tags.dedup();
+        if let Err(e) = a.lib.update_tone(&id, |x| x.tags = tags) {
+            a.toast(e.to_string(), true);
+            return;
+        }
+        // a filter on a tag nobody carries any more would show an empty library
+        if let Some(u) = a.tag.strip_prefix('#') {
+            if !a.lib.tones.iter().any(|x| x.tags.iter().any(|g| g == u)) {
+                a.tag.clear();
+                a.ui().set_tag(s(""));
+            }
+        }
+        a.refresh_editor();
+        a.refresh_list();
+    }));
     ui.on_tag_picked(|t| with_app(|a| {
         a.tag = t.to_string();
         a.ui().set_tag(t);
@@ -1569,7 +2206,7 @@ fn bind(ui: &MainWindow) {
                 a.saved = a.edit.clone();
                 a.refresh_editor();
                 a.refresh_row(&id);
-                a.toast("Zapisano w bibliotece", false);
+                a.toast("Saved to library", false);
             }
             Err(e) => a.toast(e.to_string(), true),
         }
@@ -1592,11 +2229,14 @@ fn bind(ui: &MainWindow) {
                 a.refresh_nav();
                 a.refresh_list();
                 a.select(&nid);
-                a.toast(format!("Utworzono „{name}”"), false);
+                a.toast(format!("Created “{name}”"), false);
             }
             Err(e) => a.toast(e.to_string(), true),
         }
     }));
+    ui.on_insp_delay_sync(|ms| with_app(|a| a.delay_sync(ms)));
+    ui.on_undo(|| with_app(|a| a.history_step(false)));
+    ui.on_redo(|| with_app(|a| a.history_step(true)));
     ui.on_revert(|| with_app(|a| {
         a.edit = a.saved.clone();
         if a.is_live() {
@@ -1617,7 +2257,7 @@ fn bind(ui: &MainWindow) {
                 } else {
                     a.refresh_editor();
                 }
-                a.toast(format!("„{name}” przeniesione do kosza ({}/trash)", a.lib.root().display()), false);
+                a.toast(format!("“{name}” moved to trash ({}/trash)", a.lib.root().display()), false);
             }
             Err(e) => a.toast(e.to_string(), true),
         }
@@ -1643,7 +2283,7 @@ fn bind(ui: &MainWindow) {
         a.dev.send(Cmd::ReadSlot(slot as u8));
     }));
     ui.on_connect(|| with_app(|a| {
-        a.ui().set_conn_text(s("łączenie…"));
+        a.ui().set_conn_text(s("Connecting…"));
         a.dev.send(Cmd::Connect);
     }));
     ui.on_select_slot(|i| with_app(|a| a.dev.send(Cmd::SelectSlot(i as u8))));
@@ -1653,7 +2293,7 @@ fn bind(ui: &MainWindow) {
     ui.on_import_windows(|| with_app(|a| {
         let dirs = find_bts_dirs();
         if dirs.is_empty() {
-            a.toast("Brak zamontowanej biblioteki BOSS Tone Studio", true);
+            a.toast("No mounted BOSS Tone Studio library", true);
             return;
         }
         for d in dirs {
@@ -1664,7 +2304,7 @@ fn bind(ui: &MainWindow) {
 
 fn audition(a: &mut App) {
     if !a.connected {
-        a.toast("Wzmacniacz niepodłączony", true);
+        a.toast("Amp not connected", true);
         return;
     }
     let Some(id) = a.sel.clone() else { return };

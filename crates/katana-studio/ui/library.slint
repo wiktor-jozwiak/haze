@@ -1,0 +1,725 @@
+// Library pages: preset cards in a responsive grid (Library and Setlists tabs) and the compact
+// rows of the quick preset picker window. No permanent side list: the rig gets the full width.
+import { ListView } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { Icon, Icons, Tip } from "widgets.slint";
+import { LedImg } from "rig.slint";
+
+export struct ToneRow {
+    id: string,
+    /// 1-based position in the library (stable across filters), shown as "#12"
+    index: int,
+    name: string,
+    amp: string,
+    fx: string,
+    fav: bool,
+    live: bool,
+    leds: [int],
+}
+
+export struct NavItem {
+    id: string,
+    name: string,
+    count: int,
+    kind: int, // 0 library, 1 favourites, 2 setlist, 3 amp backup, 4 header
+}
+
+/// Quick-access tone (favourites first, then recently used).
+export struct Essential {
+    id: string,
+    name: string,
+    abbr: string,
+    color: color,
+    live: bool,
+    selected: bool,
+}
+
+/// Pill chip (tag filters, quick-access tones).
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <color> dot: transparent;
+    callback clicked;
+    width: row.preferred-width + 24px;
+    height: 28px;
+    border-radius: 14px;
+    background: active ? T.accent : ta.has-hover ? T.hover : T.panel;
+    row := HorizontalLayout {
+        x: 12px;
+        spacing: 7px;
+        if dot != transparent: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                border-radius: 3.5px;
+                background: root.dot;
+            }
+        }
+        Text {
+            text: root.text;
+            color: active ? T.accent-ink : T.text-2;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// One preset in the grid: name, amp, active effects and a five-block signature strip
+/// (Booster, Mod, FX, Delay, Reverb lit in their block colours).
+export component PresetCard inherits Rectangle {
+    in property <ToneRow> tone;
+    in property <bool> selected;
+    callback clicked;
+    callback opened;
+    callback fav;
+    callback add;
+    height: 118px;
+    border-radius: T.r-card;
+    background: root.hov ? T.panel-hi : T.panel;
+    border-width: selected ? 2px : 0;
+    border-color: T.accent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+        double-clicked => { root.opened(); }
+    }
+    Text {
+        x: 16px;
+        y: 14px;
+        width: parent.width - 56px;
+        text: tone.name;
+        overflow: elide;
+        color: T.text;
+        font-size: 15px;
+        font-weight: 700;
+    }
+    Text {
+        x: 16px;
+        y: 37px;
+        width: parent.width - 32px;
+        text: tone.amp;
+        overflow: elide;
+        color: T.text-2;
+        font-size: 12.5px;
+    }
+    Text {
+        x: 16px;
+        y: 56px;
+        width: parent.width - 32px;
+        text: tone.fx == "" ? "No effects" : tone.fx;
+        overflow: elide;
+        color: T.text-3;
+        font-size: 11.5px;
+    }
+    // effect signature
+    HorizontalLayout {
+        x: 16px;
+        y: parent.height - 30px;
+        height: 12px;
+        spacing: 4px;
+        for l[i] in tone.leds: Rectangle {
+            width: 20px;
+            border-radius: 3px;
+            background: l > 0 ? T.fx(i) : #262931;
+        }
+    }
+    if tone.live: Rectangle {
+        x: parent.width - self.width - 14px;
+        y: parent.height - 34px;
+        width: lt.preferred-width + 26px;
+        height: 20px;
+        border-radius: 10px;
+        background: T.led-red.with-alpha(0.14);
+        Rectangle {
+            x: 8px;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: T.led-red;
+        }
+        lt := Text {
+            x: 19px;
+            text: "On amp";
+            color: #FF8A95;
+            font-size: 11px;
+            font-weight: 600;
+        }
+    }
+    if !tone.live: Text {
+        x: parent.width - self.width - 16px;
+        y: parent.height - 32px;
+        text: root.hov ? "Double-click to edit" : "#" + tone.index;
+        color: T.text-3;
+        font-family: root.hov ? T.display : T.mono;
+        font-size: 11px;
+    }
+    property <bool> hov: ta.has-hover || fta.has-hover || ata.has-hover;
+    // add to a setlist (hover)
+    Rectangle {
+        visible: root.hov;
+        x: parent.width - 72px;
+        y: 8px;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: ata.has-hover ? T.hover : transparent;
+        Icon {
+            d: Icons.plus;
+            size: 16px;
+            tint: ata.has-hover ? T.text : T.text-2;
+        }
+        ata := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.add(); }
+        }
+    }
+    // favourite star (always visible when set, on hover otherwise)
+    Rectangle {
+        visible: tone.fav || root.hov;
+        x: parent.width - 40px;
+        y: 8px;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: fta.has-hover ? T.hover : transparent;
+        Icon {
+            d: Icons.star;
+            size: 16px;
+            filled: tone.fav;
+            tint: tone.fav ? T.accent : T.text-2;
+        }
+        fta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.fav(); }
+        }
+    }
+    if ata.has-hover: Tip {
+        x: parent.width - self.width - 8px;
+        y: 42px;
+        text: "Add to setlist";
+    }
+}
+
+export component LibraryGrid inherits Rectangle {
+    in property <[ToneRow]> tones;
+    in property <int> selected-index: -1;
+    in property <string> empty-text;
+    callback clicked(int);
+    callback opened(int);
+    callback fav(int);
+    callback add(int);
+    property <length> gap: 12px;
+    property <int> cols: Math.max(1, Math.floor((self.width - 10px + gap) / (240px + gap)));
+
+    ListView {
+        for r in Math.ceil(tones.length / cols): HorizontalLayout {
+            padding-right: 10px;
+            padding-bottom: root.gap;
+            spacing: root.gap;
+            for c in root.cols: Rectangle {
+                horizontal-stretch: 1;
+                height: 118px;
+                if r * root.cols + c < tones.length: PresetCard {
+                    tone: tones[r * root.cols + c];
+                    selected: r * root.cols + c == selected-index;
+                    clicked => { root.clicked(r * root.cols + c); }
+                    opened => { root.opened(r * root.cols + c); }
+                    fav => { root.fav(r * root.cols + c); }
+                    add => { root.add(r * root.cols + c); }
+                }
+            }
+        }
+    }
+    if tones.length == 0: Text {
+        width: Math.min(parent.width - 48px, 460px);
+        text: root.empty-text;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        color: T.text-2;
+        font-size: 14px;
+    }
+}
+
+/// Collection row in the Setlists collections column (kind 2 setlist, 3 amp backup, 4 section label).
+export component SetRow inherits Rectangle {
+    in property <NavItem> item;
+    in property <bool> selected;
+    callback clicked;
+    // the "LIBRARY" header (All / Favorites) belongs to the Library tab
+    height: item.kind == 4 ? (item.id == "h-lib" ? 0px : 34px) : item.kind >= 2 ? 44px : 0px;
+    visible: item.kind >= 2 && item.id != "h-lib";
+    border-radius: 10px;
+    background: item.kind == 4 ? transparent : selected ? T.panel-hi : ta.has-hover ? T.hover.with-alpha(0.6) : transparent;
+    if item.kind == 4: Text {
+        x: 12px;
+        y: parent.height - 22px;
+        text: item.name == "SETLISTS" ? "Your setlists" : "Amp backups";
+        color: T.text-3;
+        font-size: 11.5px;
+        font-weight: 600;
+    }
+    if item.kind != 4 && selected: Rectangle {
+        x: 0;
+        y: 12px;
+        width: 3px;
+        height: parent.height - 24px;
+        border-radius: 1.5px;
+        background: T.accent;
+    }
+    if item.kind != 4: HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 18px; // clear of the list's scrollbar
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                d: item.kind == 3 ? Icons.backup : Icons.setlist;
+                size: 17px;
+                tint: root.selected ? T.accent-hi : T.text-3;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: item.name;
+            overflow: elide;
+            color: root.selected ? T.text : T.text-2;
+            font-size: 13.5px;
+            font-weight: root.selected ? 600 : 400;
+            vertical-alignment: center;
+        }
+        Text {
+            text: item.count;
+            color: T.text-3;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: item.kind == 2 || item.kind == 3;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Small square icon button shown on a hovered song row.
+component RowAction inherits Rectangle {
+    in property <string> icon;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: ta.has-hover && enabled ? (danger ? T.danger.with-alpha(0.16) : T.hover) : transparent;
+    Icon {
+        d: root.icon;
+        size: 16px;
+        tint: !enabled ? T.text-off : ta.has-hover ? (danger ? T.danger : T.text) : T.text-2;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// One song of a setlist: running number, name, amp + effects, effect signature; hover shows
+/// reorder and remove actions. Click selects (and plays on the amp), double-click opens the rig.
+export component SongRow inherits Rectangle {
+    in property <ToneRow> tone;
+    in property <int> number;
+    in property <bool> selected;
+    in property <bool> first;
+    in property <bool> last;
+    in property <bool> editable: true;
+    callback clicked;
+    callback opened;
+    callback moved(int);
+    callback removed;
+    height: 64px;
+    border-radius: 12px;
+    background: selected ? T.panel-hi : ta.has-hover ? T.panel : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+        double-clicked => { root.opened(); }
+    }
+    if selected: Rectangle {
+        x: 0;
+        y: 18px;
+        width: 3px;
+        height: parent.height - 36px;
+        border-radius: 1.5px;
+        background: T.accent;
+    }
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 12px;
+        spacing: 16px;
+        Text {
+            width: 34px;
+            text: (number < 10 ? "0" : "") + number;
+            color: selected ? T.accent-hi : T.text-3;
+            font-family: T.mono;
+            font-size: 17px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 3px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: tone.name;
+                    overflow: elide;
+                    color: T.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+                if tone.live: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: lt.preferred-width + 22px;
+                        height: 18px;
+                        border-radius: 9px;
+                        background: T.led-red.with-alpha(0.14);
+                        Rectangle {
+                            x: 7px;
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: T.led-red;
+                        }
+                        lt := Text {
+                            x: 16px;
+                            text: "On amp";
+                            color: #FF8A95;
+                            font-size: 10.5px;
+                            font-weight: 600;
+                        }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Text {
+                text: tone.fx != "" ? tone.amp + "  ·  " + tone.fx : tone.amp;
+                overflow: elide;
+                color: T.text-3;
+                font-size: 12px;
+            }
+        }
+        // effect signature (hidden while the row shows its actions)
+        if !ta.has-hover || !editable: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 4px;
+            for l[i] in tone.leds: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 16px;
+                    height: 10px;
+                    border-radius: 3px;
+                    background: l > 0 ? T.fx(i) : #262931;
+                }
+            }
+        }
+        if ta.has-hover && editable: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 2px;
+            VerticalLayout {
+                alignment: center;
+                RowAction {
+                    icon: Icons.chevron-up;
+                    enabled: !root.first;
+                    clicked => { root.moved(-1); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                RowAction {
+                    icon: Icons.chevron-down;
+                    enabled: !root.last;
+                    clicked => { root.moved(1); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                RowAction {
+                    icon: Icons.close;
+                    danger: true;
+                    clicked => { root.removed(); }
+                }
+            }
+        }
+    }
+}
+
+/// Compact row of the quick preset picker window.
+export component ToneItem inherits Rectangle {
+    in property <ToneRow> tone;
+    in property <bool> selected;
+    callback clicked;
+    height: 50px;
+    border-radius: 10px;
+    background: selected ? T.panel-hi : ta.has-hover ? T.hover : transparent;
+    if selected: Rectangle { x: 0; y: 14px; width: 3px; height: parent.height - 28px; border-radius: 1.5px; background: T.accent; }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 8px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: tone.name;
+                color: T.text;
+                font-size: 14px;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                text: tone.fx != "" ? tone.amp + " · " + tone.fx : tone.amp;
+                color: T.text-3;
+                font-size: 11.5px;
+                overflow: elide;
+            }
+        }
+        if tone.live: VerticalLayout {
+            alignment: center;
+            LedImg {
+                width: 12px;
+                height: 12px;
+                state: 2;
+            }
+        }
+        if tone.fav: VerticalLayout {
+            alignment: center;
+            Icon { d: Icons.star; size: 13px; filled: true; tint: T.accent; }
+        }
+        Text {
+            min-width: 32px;
+            text: "#" + tone.index;
+            color: T.text-3;
+            font-family: T.mono;
+            font-size: 11px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ---------------------------------------------------------------- starter rigs
+
+/// One block in a starter rig's artwork.
+export struct BlockChip {
+    hue: color,
+    on: bool,
+    is-amp: bool,
+}
+
+export struct TemplateRow {
+    name: string,
+    style: string,
+    blurb: string,
+    hue: color,
+    amp: string,
+    chain: string,
+    fx: string,
+    blocks: [BlockChip],
+}
+
+/// Miniature pedalboard: the rig's chain in signal order, lit blocks in their colours.
+component BoardArt inherits Rectangle {
+    in property <[BlockChip]> blocks;
+    property <length> bw: 17px;
+    property <length> gap: 7px;
+    property <length> total: blocks.length * (bw + gap) - gap;
+    width: total + 28px;
+    height: 58px;
+    border-radius: 9px;
+    background: #0D0E11d0;
+    border-width: 1px;
+    border-color: #ffffff12;
+    // cable
+    Rectangle {
+        x: 6px;
+        y: 20px;
+        width: parent.width - 12px;
+        height: 2px;
+        background: #4A4E57;
+    }
+    for b[i] in blocks: Rectangle {
+        x: 14px + i * (root.bw + root.gap);
+        y: 8px;
+        width: root.bw;
+        height: 42px;
+        border-radius: 3px;
+        background: b.is-amp ? #24262B : b.on ? b.hue : #2A2D33;
+        border-width: 1px;
+        border-color: #00000060;
+        if b.is-amp: Rectangle {
+            x: 2px;
+            y: 2px;
+            width: parent.width - 4px;
+            height: 10px;
+            border-radius: 2px;
+            background: T.accent;
+        }
+        if !b.is-amp: Rectangle {
+            y: 5px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: b.on ? T.led-green : #00000060;
+        }
+        if !b.is-amp: Rectangle {
+            y: parent.height - 12px;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: b.on ? #E8EAF0 : #6B7180;
+        }
+    }
+}
+
+/// Starter rig card: artwork banner (colour wash + miniature board), name, style, what's in it.
+export component StarterCard inherits Rectangle {
+    in property <TemplateRow> t;
+    callback used;
+    height: 262px;
+    border-radius: T.r-card;
+    background: ta.has-hover ? T.panel-hi : T.panel;
+    clip: true;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        double-clicked => { root.used(); }
+    }
+    // banner
+    Rectangle {
+        y: 0;
+        height: 118px;
+        background: @linear-gradient(135deg, t.hue.darker(0.35).with-alpha(0.85) 0%, t.hue.darker(0.8).with-alpha(0.55) 55%, #14161A 100%);
+        // soft light pool behind the board
+        Rectangle {
+            x: parent.width - 150px;
+            y: -60px;
+            width: 220px;
+            height: 220px;
+            border-radius: 110px;
+            background: t.hue.with-alpha(0.10);
+        }
+        BoardArt {
+            x: (parent.width - self.width) / 2;
+            y: 36px;
+            blocks: t.blocks;
+        }
+        Rectangle {
+            x: 14px;
+            y: 12px;
+            width: st.preferred-width + 18px;
+            height: 22px;
+            border-radius: 11px;
+            background: #0D0E11a0;
+            st := Text {
+                text: t.style;
+                color: T.text;
+                font-size: 11px;
+                font-weight: 700;
+            }
+        }
+    }
+    Text {
+        x: 16px;
+        y: 132px;
+        width: parent.width - 32px;
+        text: t.name;
+        overflow: elide;
+        color: T.text;
+        font-size: 17px;
+        font-weight: 700;
+    }
+    Text {
+        x: 16px;
+        y: 157px;
+        width: parent.width - 32px;
+        text: t.amp + "  ·  " + t.chain;
+        overflow: elide;
+        color: T.text-2;
+        font-size: 12px;
+    }
+    Text {
+        x: 16px;
+        y: 178px;
+        width: parent.width - 32px;
+        height: 34px;
+        text: t.blurb;
+        wrap: word-wrap;
+        overflow: elide;
+        color: T.text-3;
+        font-size: 12px;
+    }
+    // footer: contents + action
+    Text {
+        x: 16px;
+        y: parent.height - 34px;
+        width: parent.width - 150px;
+        text: t.fx;
+        overflow: elide;
+        color: T.text-3;
+        font-size: 11px;
+        vertical-alignment: center;
+        height: 26px;
+    }
+    Rectangle {
+        x: parent.width - self.width - 14px;
+        y: parent.height - 40px;
+        width: ut.preferred-width + 28px;
+        height: 30px;
+        border-radius: 15px;
+        background: uta.pressed ? T.accent-lo : uta.has-hover ? T.accent-hi : ta.has-hover ? T.accent : T.hover;
+        ut := Text {
+            text: "Use this rig";
+            color: uta.has-hover || ta.has-hover ? T.accent-ink : T.text;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        uta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.used(); }
+        }
+    }
+}
+
+export component StarterGrid inherits Rectangle {
+    in property <[TemplateRow]> templates;
+    callback used(int);
+    property <length> gap: 14px;
+    property <int> cols: Math.max(1, Math.floor((self.width - 10px + gap) / (300px + gap)));
+    ListView {
+        for r in Math.ceil(templates.length / cols): HorizontalLayout {
+            padding-right: 10px;
+            padding-bottom: root.gap;
+            spacing: root.gap;
+            for c in root.cols: Rectangle {
+                horizontal-stretch: 1;
+                height: 262px;
+                if r * root.cols + c < templates.length: StarterCard {
+                    t: templates[r * root.cols + c];
+                    used => { root.used(r * root.cols + c); }
+                }
+            }
+        }
+    }
+}

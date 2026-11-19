@@ -1,0 +1,193 @@
+import { ListView } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { Btn, Icons } from "widgets.slint";
+import { ToneRow, NavItem, SetRow, SongRow } from "library.slint";
+import { ToolBtn } from "parts.slint";
+
+/// Setlists page: collections column | numbered songs of the selected one.
+export component SetlistsPage inherits HorizontalLayout {
+    in property <[NavItem]> nav;
+    in property <string> nav-selected;
+    in property <string> nav-title;
+    in property <[ToneRow]> tones;
+    in property <int> selected-index;
+    in property <bool> has-selection;
+    callback nav-clicked(string);
+    callback set-new();
+    callback set-rename(string);
+    callback set-add-current();
+    callback live();
+    callback export-list();
+    callback tone-clicked(int);
+    callback tone-opened(int);
+    callback song-move(int, int);
+    callback song-remove(int);
+
+    padding-top: 6px;
+    spacing: 14px;
+    // ---------- collections column
+    Rectangle {
+        width: 270px;
+        border-radius: T.r-card;
+        background: T.panel;
+        VerticalLayout {
+            padding: 12px;
+            padding-top: 16px;
+            spacing: 6px;
+            HorizontalLayout {
+                height: 32px;
+                padding-left: 6px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Setlists";
+                    color: T.text;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: nt.preferred-width + 24px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: nta.has-hover ? T.hover : T.panel-hi;
+                    nt := Text {
+                        text: "+ New";
+                        color: T.text;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+                    nta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { set-new(); }
+                    }
+                }
+            }
+            ListView {
+                vertical-stretch: 1;
+                for item in nav: SetRow {
+                    item: item;
+                    selected: item.id == nav-selected;
+                    clicked => { root.nav-clicked(item.id); }
+                }
+            }
+        }
+    }
+    // ---------- songs
+    Rectangle {
+        horizontal-stretch: 1;
+        border-radius: T.r-card;
+        background: T.bg;
+        if nav-selected == "": VerticalLayout {
+            alignment: center;
+            spacing: 12px;
+            Text {
+                text: "Build your first setlist";
+                horizontal-alignment: center;
+                color: T.text;
+                font-size: 18px;
+                font-weight: 700;
+            }
+            Text {
+                text: "Group presets in the order you play them. Imported .tsl collections and amp backups show up here too.";
+                horizontal-alignment: center;
+                wrap: word-wrap;
+                color: T.text-2;
+            }
+            HorizontalLayout {
+                alignment: center;
+                Btn {
+                    primary: true;
+                    text: "New setlist";
+                    clicked => { set-new(); }
+                }
+            }
+        }
+        if nav-selected != "": VerticalLayout {
+            padding-left: 24px;
+            padding-right: 24px;
+            padding-top: 18px;
+            padding-bottom: 12px;
+            spacing: 14px;
+            HorizontalLayout {
+                height: 52px;
+                spacing: 10px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 3px;
+                    // click the title to rename, Enter saves
+                    TextInput {
+                        text: nav-title;
+                        color: T.text;
+                        font-size: 22px;
+                        font-weight: 700;
+                        single-line: true;
+                        accepted => {
+                            set-rename(self.text);
+                            self.clear-focus();
+                        }
+                    }
+                    Text {
+                        text: (tones.length == 1 ? "1 preset" : tones.length + " presets") + "  ·  click a song to play it, double-click to edit";
+                        color: T.text-3;
+                        font-size: 12px;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ToolBtn {
+                        text: "Live";
+                        icon: Icons.chevron-right;
+                        enabled: tones.length > 0;
+                        clicked => { root.live(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ToolBtn {
+                        text: "Add current preset";
+                        icon: Icons.import;
+                        enabled: has-selection;
+                        clicked => { set-add-current(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    ToolBtn {
+                        text: "Export";
+                        icon: Icons.export;
+                        enabled: tones.length > 0;
+                        clicked => { export-list(); }
+                    }
+                }
+            }
+            Rectangle {
+                height: 1px;
+                background: T.line;
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                ListView {
+                    for tone[i] in tones: SongRow {
+                        tone: tone;
+                        number: i + 1;
+                        selected: i == selected-index;
+                        first: i == 0;
+                        last: i == tones.length - 1;
+                        clicked => { tone-clicked(i); }
+                        opened => { tone-opened(i); }
+                        moved(d) => { song-move(i, d); }
+                        removed => { song-remove(i); }
+                    }
+                }
+                if tones.length == 0: Text {
+                    width: Math.min(parent.width - 48px, 420px);
+                    text: "This setlist is empty. Load a preset on the Rig or pick one in the Library, then use “Add current preset”.";
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                    color: T.text-2;
+                }
+            }
+        }
+    }
+}

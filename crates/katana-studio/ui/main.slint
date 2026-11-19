@@ -1,268 +1,25 @@
 import { ListView } from "std-widgets.slint";
 import { T } from "theme.slint";
-import { Label, Btn, Led, Toggle, SearchField, Icon, Icons, Seg } from "widgets.slint";
-import { AmpCore, PedalView, ChainNode, Wire, Pedal, MiniKnob, KnobVal, LedImg } from "rig.slint";
-import { LibrarySidebar, ToneRow, NavItem, Essential, SidebarMetrics } from "sidebar.slint";
+import { Label, Btn, Led, Toggle, Icon, Icons } from "widgets.slint";
+import { PedalView, ChainNode, Wire, Pedal, PedalKnob } from "rig.slint";
+import { ToneRow, NavItem, Essential, TemplateRow, BlockChip } from "library.slint";
 import { Inspector, ParamRow } from "inspector.slint";
+import { PracticeDrawer } from "practice.slint";
+import { Slot, Opt } from "types.slint";
+import { IconBtn, MenuItem, Menu, SlotChip, ModeBtn, Pick, Well, PillDivider, Meter, SettingsRow, PageTab } from "parts.slint";
+import { LibraryPage } from "page-library.slint";
+import { SetlistsPage } from "page-setlists.slint";
+import { StartersPage } from "page-starters.slint";
+import { Picker } from "picker.slint";
+import { SlotPicker, ConfirmWrite, ImportDialog, AddToSetlist, TagsDialog } from "dialogs.slint";
+import { LiveView } from "live.slint";
 
-export { T, Pedal, MiniKnob, KnobVal, ToneRow, NavItem, Essential, ParamRow }
-
-export struct Slot {
-    label: string,
-    name: string,
-    current: bool,
-}
-
-export struct Opt {
-    value: int,
-    label: string,
-}
-
-// ---------------------------------------------------------------- small parts
-
-component IconBtn inherits Rectangle {
-    in property <string> icon;
-    in property <bool> filled;
-    in property <bool> active;
-    callback clicked;
-    width: 34px;
-    height: 34px;
-    border-radius: 17px;
-    background: active ? T.hover : ta.has-hover ? T.panel-hi : transparent;
-    Icon {
-        d: icon;
-        filled: root.filled;
-        size: 20px;
-        tint: ta.has-hover || active ? T.text : T.text-2;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-component MenuItem inherits Rectangle {
-    in property <string> text;
-    in property <bool> danger;
-    in property <bool> enabled: true;
-    callback clicked;
-    height: 36px;
-    border-radius: 6px;
-    background: ta.has-hover && enabled ? T.hover : transparent;
-    Text {
-        x: 14px;
-        text: root.text;
-        color: !enabled ? T.text-3 : danger ? T.danger : T.text;
-        vertical-alignment: center;
-        height: parent.height;
-    }
-    ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-component Menu inherits Rectangle {
-    background: T.panel-hi;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: T.line-hi;
-    drop-shadow-blur: 24px;
-    drop-shadow-offset-y: 10px;
-    drop-shadow-color: #000000c0;
-    @children
-}
-
-component SlotChip inherits Rectangle {
-    in property <Slot> slot;
-    callback clicked;
-    callback pull;
-    callback push;
-    height: 40px;
-    border-radius: T.r;
-    background: slot.current ? T.panel-hi : ta.has-hover ? T.panel : transparent;
-    border-width: slot.current ? 1px : 0;
-    border-color: T.accent-lo;
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 8px;
-        spacing: 8px;
-        Text {
-            text: slot.label;
-            color: slot.current ? T.accent-hi : T.text-3;
-            font-family: T.mono;
-            font-weight: 700;
-            font-size: 10.5px;
-            letter-spacing: 1px;
-            vertical-alignment: center;
-        }
-        Text {
-            text: slot.name;
-            color: slot.current ? T.text : T.text-2;
-            font-family: T.display;
-            font-weight: 700;
-            font-size: 13px;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-        }
-        if ta.has-hover: Rectangle {
-            width: 16px;
-            Icon { d: Icons.pull; size: 16px; tint: pa.has-hover ? T.text : T.text-3; y: (parent.height - 16px) / 2; }
-            pa := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.pull(); }
-            }
-        }
-        if ta.has-hover && slot.label != "PANEL": Rectangle {
-            width: 16px;
-            Icon { d: Icons.push; size: 16px; tint: wa.has-hover ? T.text : T.text-3; y: (parent.height - 16px) / 2; }
-            wa := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.push(); }
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------- top bar parts
-
-/// One half of the HARDWARE / STANDALONE switch.
-component ModeSeg inherits Rectangle {
-    in property <string> title;
-    in property <string> sub;
-    in property <color> led;
-    in property <bool> active;
-    callback clicked;
-    width: 150px;
-    border-radius: T.r;
-    background: active ? led.with-alpha(0.10) : ta.has-hover ? T.hover : transparent;
-    border-width: 1px;
-    border-color: active ? led.with-alpha(0.55) : transparent;
-    HorizontalLayout {
-        padding-left: 10px;
-        spacing: 8px;
-        VerticalLayout {
-            alignment: center;
-            Rectangle {
-                width: 7px;
-                height: 7px;
-                border-radius: 3.5px;
-                background: active ? led : #2A2D35;
-            }
-        }
-        VerticalLayout {
-            alignment: center;
-            spacing: 1px;
-            Text {
-                text: title;
-                color: active ? T.text : T.text-2;
-                font-family: T.mono;
-                font-weight: 700;
-                font-size: 11px;
-                letter-spacing: 1.2px;
-            }
-            Text {
-                text: sub;
-                color: active ? led : T.text-3;
-                font-family: T.mono;
-                font-size: 9px;
-                letter-spacing: 0.6px;
-            }
-        }
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-/// Small segmented option (buffer size, sample rate, A/B).
-component Pick inherits Rectangle {
-    in property <string> text;
-    in property <bool> active;
-    in property <bool> enabled: true;
-    callback clicked;
-    width: t.preferred-width + 14px;
-    height: 24px;
-    border-radius: 3px;
-    background: active ? T.accent : ta.has-hover && enabled ? T.hover : transparent;
-    opacity: enabled ? 1 : 0.4;
-    t := Text {
-        text: root.text;
-        color: active ? T.accent-ink : T.text-2;
-        font-family: T.mono;
-        font-weight: 600;
-        font-size: 10.5px;
-    }
-    ta := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-/// Recessed well grouping top-bar controls.
-component Well inherits Rectangle {
-    height: 36px;
-    border-radius: T.r;
-    background: T.well;
-    border-width: 1px;
-    border-color: T.line;
-}
-
-/// Peak meter with clip LED.
-component Meter inherits Rectangle {
-    in property <string> label;
-    in property <float> level; // 0..1 peak
-    in property <bool> clipped;
-    width: 54px;
-    height: 36px;
-    Text {
-        x: 0;
-        y: 3px;
-        text: root.label;
-        color: T.text-3;
-        font-family: T.mono;
-        font-size: 8.5px;
-        letter-spacing: 1px;
-    }
-    Rectangle {
-        x: parent.width - 6px;
-        y: 4px;
-        width: 6px;
-        height: 6px;
-        border-radius: 3px;
-        background: clipped ? T.led-red : #2A2D35;
-    }
-    Rectangle {
-        x: 0;
-        y: 20px;
-        width: parent.width;
-        height: 6px;
-        border-radius: 1px;
-        background: T.well;
-        border-width: 1px;
-        border-color: T.line;
-        Rectangle {
-            x: 1px;
-            y: 1px;
-            height: 4px;
-            width: (parent.width - 2px) * clamp(root.level, 0, 1);
-            background: root.level > 0.89 ? T.led-red : root.level > 0.7 ? T.led-yellow : T.accent;
-        }
-    }
-}
+export { T, Pedal, PedalKnob, ToneRow, NavItem, Essential, ParamRow, TemplateRow, BlockChip, Slot, Opt }
 
 // ---------------------------------------------------------------- window
 
 export component MainWindow inherits Window {
-    title: "Haze";
+    title: "Haze Studio";
     icon: @image-url("art/icon.png");
     preferred-width: 1680px;
     preferred-height: 1000px;
@@ -275,22 +32,39 @@ export component MainWindow inherits Window {
     // --- library
     in property <[NavItem]> nav;
     in property <string> nav-selected;
+    /// number of user setlists (kind 2) in `nav`
+    in property <int> set-count;
     in property <string> nav-title;
     in property <[ToneRow]> tones;
     in property <int> selected-index: -1;
     in property <bool> has-selection;
     in property <[Essential]> essentials;
-    in-out property <bool> sidebar-pinned: true;
+    /// 0 Rig, 1 Library, 2 Setlists, 3 Starter rigs
+    in-out property <int> page;
+    in property <[TemplateRow]> templates;
+    in-out property <string> query;
 
     // --- engine mode + studio utilities (fed by the audio engine; idle values until it runs)
     in property <bool> hw-mode: true;
     in property <string> audio-host: "ALSA";
-    in property <string> audio-device: "default";
+    in property <string> audio-device: "System default";
+    in property <string> audio-input: "None (DI)";
     in property <int> audio-buffer: 128;
     in property <int> audio-rate: 48000;
     in property <bool> audio-running;
     in property <float> audio-latency;
     in property <bool> di-on: true;
+    // practice suite
+    in-out property <bool> practice-open;
+    in property <int> loop-state;
+    in property <float> loop-progress;
+    in property <string> loop-time: "0.0 s";
+    in property <bool> drum-on;
+    in property <int> drum-pattern;
+    in property <int> bpm: 100;
+    in property <int> drum-step;
+    in property <string> ir-name: "built-in (per amp)";
+    in property <string> di-name: "built-in riff";
     in property <int> dsp-voicing: -1;
     in property <string> tuner-note: "—";
     in property <float> tuner-cents;
@@ -303,10 +77,13 @@ export component MainWindow inherits Window {
     in property <int> ab-slot;
     in property <bool> ab-has-b;
     in property <string> tag;
+    in property <[string]> user-tags;
+    in-out property <int> sort;
+    in property <int> ui-scale: 100;
 
     // --- amp connection
     in property <bool> connected;
-    in property <string> conn-text: "szukam…";
+    in property <string> conn-text: "Offline";
     in property <[Slot]> slots;
     in property <string> busy-text;
     in property <float> busy-progress: -1;
@@ -317,6 +94,8 @@ export component MainWindow inherits Window {
     in property <string> ed-name;
     in property <string> ed-origin;
     in property <bool> ed-fav;
+    /// user tags of the edited tone, comma separated
+    in property <string> ed-tags;
     in property <bool> ed-dirty;
     in property <bool> ed-live;
     in property <string> ed-amp-name;
@@ -325,13 +104,16 @@ export component MainWindow inherits Window {
     in property <string> ed-chain-name;
     in property <int> ed-fx-on;
     in property <int> ed-fx-all;
-    in property <[KnobVal]> knobs;
     in property <[Pedal]> pedals;
     in property <int> pedal-selected: -1;
     in property <[bool]> drop-ok;
+    in property <bool> can-undo;
+    in property <bool> can-redo;
 
-    // --- inspector
+    // --- inspector (single source of truth for the selected block)
     in property <bool> insp-open;
+    in property <bool> insp-is-amp;
+    in property <int> insp-kind;
     in property <string> insp-title;
     in property <string> insp-subtitle;
     in property <color> insp-hue;
@@ -345,6 +127,11 @@ export component MainWindow inherits Window {
     in property <int> insp-section;
     in property <[ParamRow]> insp-params;
     in property <float> insp-params-h;
+    in property <int> insp-extra;
+    in property <string> insp-eq-curve;
+    in property <string> insp-eq-fill;
+    in property <int> insp-delay-ms;
+    callback insp-delay-sync(int);
 
     in property <[Opt]> popup-options;
     in property <string> popup-title;
@@ -357,15 +144,14 @@ export component MainWindow inherits Window {
     callback tone-activated(int);
     callback tone-fav(int);
     callback essential-clicked(string);
-    callback knob-changed(int, int);
     callback amp-family(int);
     callback amp-variation(bool);
     callback pedal-clicked(int);
     callback pedal-toggled(int);
-    callback pedal-knob(int, int, int);
     callback pedal-drag-start(int);
     callback pedal-dropped(int, int);
-    callback insp-close();
+    callback pedal-knob-set(int, int, float);
+    callback pedal-knob-step(int, int, int);
     callback insp-toggle(bool);
     callback insp-variant-picked(int);
     callback insp-type-picked(int);
@@ -392,27 +178,59 @@ export component MainWindow inherits Window {
     callback import-windows();
     callback mode-picked(bool);
     callback audio-buffer-picked(int);
+    callback audio-device-request(bool);
     callback audio-rate-picked(int);
     callback limiter-toggled(bool);
     callback ab-picked(int);
     callback di-toggled(bool);
     callback transport();
+    callback practice-toggled(bool);
+    callback loop-action(int);
+    callback drum-toggled(bool);
+    callback drum-pattern-picked(int);
+    callback bpm-changed(int);
+    callback tap();
+    callback load-ir(string);
+    callback load-di(string);
     callback dsp-voicing-picked(int);
     callback tag-picked(string);
+    callback page-picked(int);
+    callback template-use(int);
+    callback set-new();
+    callback set-rename(string);
+    callback set-add-current();
+    callback song-move(int, int);
+    callback song-remove(int);
+    callback tone-add-to(int, string);
+    callback tone-step(int);
+    callback undo();
+    callback sort-picked(int);
+    callback ui-scale-picked(int);
+    callback set-tags(string);
+    callback redo();
 
     public function open-popup() { enum-popup.show(); }
 
     property <int> confirm-slot: -1;
     property <bool> show-import;
+    property <bool> show-tags;
+    in-out property <int> add-tone: -1;
     property <bool> show-slot-picker;
+    in-out property <bool> show-picker;
+    /// stage view over everything, window goes full screen
+    in-out property <bool> live-open;
+    full-screen: live-open;
 
-    // pedalboard geometry: fixed pitch, the drop gap is pure arithmetic
+    // pedalboard geometry: responsive pitch, the drop gap is pure arithmetic.
+    // Boxes shrink (down to 72px) before the chain scrolls, so 11 blocks + IN/OUT fit a laptop.
+    // The pitch keeps >= 14px between boxes: the side jacks and a stub of cable stay visible.
     property <length> board-w: 1000px;
-    property <length> inner: board-w - 2 * 64px;
-    // stompboxes are fixed-size bitmaps: a narrow window scrolls the chain instead of squeezing it
-    property <length> pw: 92px;
-    property <length> ph: 176px;
-    property <length> ps: clamp((inner - pedals.length * pw) / Math.max(1, pedals.length), 8px, 26px);
+    property <length> rail-w: 52px; // IN / OUT terminals and their lead cables
+    property <int> n: Math.max(1, pedals.length);
+    property <length> pw: clamp((board-w - 2 * rail-w - n * 16px) / n, 72px, 112px);
+    property <length> ph: 160px;
+    property <length> jack-y: 62px; // must match PedalView.jack-y
+    property <length> ps: clamp((board-w - 2 * rail-w - n * pw) / n, 14px, 30px);
     property <length> pitch: pw + ps;
     property <length> left: (board-w - pedals.length * pitch) / 2;
     property <int> drag-from: -1;
@@ -420,103 +238,203 @@ export component MainWindow inherits Window {
     property <int> gap: clamp(floor((drag-x - left + ps / 2) / pitch + 0.5), 0, pedals.length);
 
     VerticalLayout {
-        // ================================================= top utility bar
+        // ================================================= top bar: brand+mode | device | meters+actions
         Rectangle {
-            height: 52px;
-            Rectangle { y: parent.height - 1px; height: 1px; background: T.line; }
+            height: 56px;
             HorizontalLayout {
                 padding-left: 16px;
-                padding-right: 10px;
+                padding-right: 12px;
                 padding-top: 8px;
                 padding-bottom: 8px;
-                spacing: 10px;
-                // wordmark
+                spacing: 14px;
+                // -------- zone 1: wordmark + pages
                 HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "HAZE";
-                        color: T.text;
-                        font-family: T.mono;
-                        font-size: 15px;
-                        font-weight: 800;
-                        letter-spacing: 3px;
-                        vertical-alignment: center;
+                    spacing: 9px;
+                    padding-right: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 7px;
+                            background: @linear-gradient(135deg, T.accent-hi 0%, T.accent 60%, T.accent.darker(0.25) 100%);
+                            // three haze waves
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: T.accent-ink;
+                                stroke-width: 2.6px;
+                                fill: transparent;
+                                commands: "M2 7 C6 3.5 9 10.5 12 7 C15 3.5 18 10.5 22 7 M2 13 C6 9.5 9 16.5 12 13 C15 9.5 18 16.5 22 13 M2 19 C6 15.5 9 22.5 12 19 C15 15.5 18 22.5 22 19";
+                            }
+                        }
                     }
                     Text {
-                        text: "STUDIO";
-                        color: T.text-3;
-                        font-family: T.mono;
-                        font-size: 9px;
-                        letter-spacing: 2px;
+                        text: "Haze";
+                        color: T.text;
+                        font-size: 15px;
+                        font-weight: 700;
                         vertical-alignment: center;
                     }
                 }
-                // dual-mode switch
+                HorizontalLayout {
+                    spacing: 2px;
+                    PageTab {
+                        text: "Rig";
+                        active: page == 0;
+                        clicked => { page-picked(0); }
+                    }
+                    PageTab {
+                        text: "Library";
+                        badge: nav.length > 1 ? nav[1].count : "";
+                        active: page == 1;
+                        clicked => { page-picked(1); }
+                    }
+                    PageTab {
+                        text: "Setlists";
+                        active: page == 2;
+                        clicked => { page-picked(2); }
+                    }
+                    PageTab {
+                        text: "Starter rigs";
+                        active: page == 3;
+                        clicked => { page-picked(3); }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+
+                // -------- zone 2: engine mode + its device / connection pill
                 Well {
-                    width: 2 * 150px + 8px;
                     HorizontalLayout {
                         padding: 3px;
                         spacing: 2px;
-                        ModeSeg {
-                            title: "HARDWARE";
-                            sub: "KATANA USB-MIDI";
+                        ModeBtn {
+                            text: "Hardware";
                             led: T.amber;
                             active: hw-mode;
                             clicked => { mode-picked(true); }
                         }
-                        ModeSeg {
-                            title: "STANDALONE";
-                            sub: "PC DSP ENGINE";
+                        ModeBtn {
+                            text: "Standalone";
                             led: T.cyan;
                             active: !hw-mode;
                             clicked => { mode-picked(false); }
                         }
                     }
                 }
-                // hardware: Katana link
                 if hw-mode: Well {
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: connected ? 12px : 3px;
-                        spacing: 8px;
+                    border-radius: 18px;
+                    width: hw-row.preferred-width;
+                    hw-row := HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: connected && busy-text == "" ? 16px : 4px;
+                        spacing: 10px;
                         VerticalLayout {
                             alignment: center;
-                            Led { size: 7px; state: connected ? 1 : 0; }
+                            Led { size: 8px; state: connected ? 1 : 0; }
                         }
                         Text {
-                            text: "KATANA MKII";
-                            color: connected ? T.text : T.text-2;
-                            font-family: T.mono;
-                            font-size: 11px;
+                            text: "Katana MkII";
+                            color: T.text;
+                            font-size: 13px;
                             font-weight: 600;
                             vertical-alignment: center;
                         }
                         Text {
-                            text: conn-text;
-                            color: T.text-3;
-                            font-size: 11px;
+                            text: "·  " + (connected ? "Online" : conn-text);
+                            color: connected ? T.led-green : T.text-2;
+                            font-size: 12px;
                             vertical-alignment: center;
                         }
+                        if busy-text != "": PillDivider { }
+                        if busy-text != "": Text {
+                            text: busy-text;
+                            color: T.text-2;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                        if busy-text != "" && busy-progress >= 0: VerticalLayout {
+                            alignment: center;
+                            padding-right: 12px;
+                            Rectangle {
+                                width: 72px;
+                                height: 3px;
+                                background: T.line-hi;
+                                Rectangle {
+                                    x: 0;
+                                    width: parent.width * root.busy-progress;
+                                    background: T.accent;
+                                }
+                            }
+                        }
+                        if !connected: PillDivider { }
                         if !connected: VerticalLayout {
                             alignment: center;
-                            Pick {
-                                text: "POŁĄCZ";
-                                active: true;
-                                clicked => { connect(); }
+                            Rectangle {
+                                width: ct.preferred-width + 24px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: cta.pressed ? T.accent-lo : cta.has-hover ? T.accent-hi : T.accent;
+                                ct := Text {
+                                    text: "Connect";
+                                    color: T.accent-ink;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                }
+                                cta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { connect(); }
+                                }
                             }
                         }
                     }
                 }
-                // standalone: audio device + latency
                 if !hw-mode: Well {
-                    HorizontalLayout {
-                        padding-left: 10px;
+                    border-radius: 18px;
+                    width: Math.min(pc-row.preferred-width, 470px);
+                    pc-row := HorizontalLayout {
+                        padding-left: 14px;
                         padding-right: 4px;
                         spacing: 8px;
                         VerticalLayout {
                             alignment: center;
-                            Led { size: 7px; state: audio-running ? 1 : 0; }
+                            Led { size: 8px; state: audio-running ? 1 : 0; }
                         }
+                        Text {
+                            text: "PC DSP";
+                            color: T.text;
+                            font-size: 13px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            // engine estimate when running (buffers + ring + IR partition), else 2 buffers;
+                            // converter latency of the interface comes on top
+                            text: "·  " + (audio-running ? "Running" : "Stopped") + " · " + round((audio-running ? audio-latency : 2000 * audio-buffer / audio-rate) * 10) / 10 + " ms";
+                            color: audio-running ? T.accent : T.text-2;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                        PillDivider { }
+                        VerticalLayout {
+                            alignment: center;
+                            Pick {
+                                text: "In: " + audio-input;
+                                max-width: 130px;
+                                clicked => { audio-device-request(true); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Pick {
+                                text: "Out: " + audio-device;
+                                max-width: 130px;
+                                clicked => { audio-device-request(false); }
+                            }
+                        }
+                        PillDivider { }
                         VerticalLayout {
                             alignment: center;
                             Pick {
@@ -525,174 +443,86 @@ export component MainWindow inherits Window {
                                 clicked => { di-toggled(!di-on); }
                             }
                         }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+
+                // -------- zone 3: meters + library / settings
+                HorizontalLayout {
+                    spacing: 10px;
+                    Meter { label: "IN"; level: in-level; clipped: in-clip; }
+                    Meter { label: "OUT"; level: out-level; clipped: out-clip; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconBtn {
+                        icon: Icons.gear;
+                        tip: "Settings";
+                        clicked => { settings.show(); }
+                    }
+                }
+            }
+            settings := PopupWindow {
+                x: parent.width - 352px;
+                y: 48px;
+                width: 340px;
+                height: 260px;
+                close-policy: close-on-click-outside;
+                Menu {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 8px;
                         Text {
-                            text: audio-host + " · " + audio-device;
-                            color: T.text;
+                            text: "SETTINGS";
+                            color: T.text-2;
                             font-family: T.mono;
-                            font-size: 10.5px;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            max-width: 140px;
+                            font-size: 10px;
+                            font-weight: 700;
+                            letter-spacing: 1.2px;
                         }
-                        Rectangle { width: 1px; background: T.line; }
-                        HorizontalLayout {
-                            alignment: center;
-                            padding-top: 3px;
-                            padding-bottom: 3px;
+                        SettingsRow {
+                            label: "Interface size";
+                            for z in [100, 125, 150]: Pick {
+                                text: z + "%";
+                                active: z == ui-scale;
+                                clicked => { ui-scale-picked(z); }
+                            }
+                        }
+                        SettingsRow {
+                            label: "Buffer";
                             for b in [64, 128, 256]: Pick {
                                 text: b;
                                 active: b == audio-buffer;
                                 clicked => { audio-buffer-picked(b); }
                             }
                         }
-                        Rectangle { width: 1px; background: T.line; }
-                        HorizontalLayout {
-                            padding-top: 3px;
-                            padding-bottom: 3px;
+                        SettingsRow {
+                            label: "Sample rate";
                             for r in [48000, 96000]: Pick {
-                                text: (r / 1000) + "k";
+                                text: (r / 1000) + " kHz";
                                 active: r == audio-rate;
                                 clicked => { audio-rate-picked(r); }
                             }
                         }
-                        Rectangle { width: 1px; background: T.line; }
-                        // engine estimate when running (buffers + ring + IR partition), else 2 buffers;
-                        // converter latency of the interface comes on top
+                        SettingsRow {
+                            label: "Limiter";
+                            VerticalLayout {
+                                alignment: center;
+                                Toggle {
+                                    on: limiter;
+                                    toggled(v) => { limiter-toggled(v); }
+                                }
+                            }
+                        }
+                        SettingsRow {
+                            label: "Host";
+                            Text { text: audio-host; color: T.text; font-size: 12px; vertical-alignment: center; }
+                        }
                         Text {
-                            text: "RT " + round((audio-running ? audio-latency : 2000 * audio-buffer / audio-rate) * 10) / 10 + " ms";
-                            color: T.accent;
-                            font-family: T.mono;
-                            font-size: 10.5px;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                if busy-text != "": Text {
-                    text: busy-text;
-                    color: T.text-2;
-                    vertical-alignment: center;
-                    font-size: 11px;
-                }
-                if busy-text != "" && busy-progress >= 0: VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 90px;
-                        height: 2px;
-                        background: T.line;
-                        Rectangle {
-                            x: 0;
-                            width: parent.width * root.busy-progress;
-                            background: T.accent;
-                        }
-                    }
-                }
-                // chromatic tuner strip
-                Well {
-                    width: 128px;
-                    opacity: tuner-active ? 1 : 0.55;
-                    Text {
-                        x: 8px;
-                        width: 30px;
-                        text: tuner-note;
-                        color: tuner-active && abs(tuner-cents) < 3 ? T.led-green : T.text;
-                        font-family: T.mono;
-                        font-weight: 700;
-                        font-size: 14px;
-                        vertical-alignment: center;
-                    }
-                    Rectangle {
-                        x: 42px;
-                        y: (parent.height - 14px) / 2;
-                        width: parent.width - 52px;
-                        height: 14px;
-                        for i in 9: Rectangle {
-                            x: i * (parent.width - 2px) / 8;
-                            y: i == 4 ? 0 : 4px;
-                            width: 2px;
-                            height: i == 4 ? 14px : 6px;
-                            background: i == 4 ? T.line-hi : T.line;
-                        }
-                        if tuner-active: Rectangle {
-                            x: (parent.width - 4px) * (clamp(tuner-cents, -50, 50) + 50) / 100;
-                            width: 4px;
-                            border-radius: 1px;
-                            background: abs(tuner-cents) < 3 ? T.led-green : T.accent;
-                        }
-                    }
-                }
-                Meter { label: "IN"; level: in-level; clipped: in-clip; }
-                Meter { label: "OUT"; level: out-level; clipped: out-clip; }
-                // master limiter (PC engine only)
-                Well {
-                    width: 46px;
-                    background: limiter && !hw-mode ? T.accent.with-alpha(0.14) : lta.has-hover && !hw-mode ? T.hover : T.well;
-                    border-color: limiter && !hw-mode ? T.accent-lo : T.line;
-                    opacity: hw-mode ? 0.4 : 1;
-                    Text {
-                        text: "LIM";
-                        color: limiter && !hw-mode ? T.accent-hi : T.text-2;
-                        font-family: T.mono;
-                        font-weight: 700;
-                        font-size: 10.5px;
-                        letter-spacing: 1px;
-                    }
-                    lta := TouchArea {
-                        enabled: !hw-mode;
-                        mouse-cursor: pointer;
-                        clicked => { limiter-toggled(!limiter); }
-                    }
-                }
-                // A/B snapshot compare
-                Well {
-                    width: 62px;
-                    HorizontalLayout {
-                        padding: 3px;
-                        spacing: 2px;
-                        Pick {
-                            text: "A";
-                            width: 26px;
-                            active: ab-slot == 0;
-                            enabled: has-selection;
-                            clicked => { ab-picked(0); }
-                        }
-                        Pick {
-                            text: ab-has-b ? "B" : "+B";
-                            width: 26px;
-                            active: ab-slot == 1;
-                            enabled: has-selection;
-                            clicked => { ab-picked(1); }
-                        }
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    app-menu-btn := IconBtn {
-                        icon: Icons.menu;
-                        clicked => { app-menu.show(); }
-                    }
-                }
-            }
-            app-menu := PopupWindow {
-                x: parent.width - 250px;
-                y: 46px;
-                width: 236px;
-                height: 3 * 36px + 12px;
-                Menu {
-                    VerticalLayout {
-                        padding: 6px;
-                        MenuItem {
-                            text: "Importuj brzmienia…";
-                            clicked => { show-import = true; app-menu.close(); }
-                        }
-                        MenuItem {
-                            text: "Kopia wszystkich kanałów";
-                            enabled: connected;
-                            clicked => { backup-amp(); app-menu.close(); }
-                        }
-                        MenuItem {
-                            text: "Eksportuj kolekcję (.tsl)";
-                            clicked => { export-list(); app-menu.close(); }
+                            text: "Buffer, rate and limiter apply to the PC DSP engine. Hardware mode uses the Katana's own audio path.";
+                            wrap: word-wrap;
+                            color: T.text-3;
+                            font-size: 11px;
                         }
                     }
                 }
@@ -701,49 +531,79 @@ export component MainWindow inherits Window {
 
         HorizontalLayout {
             vertical-stretch: 1;
-            padding-top: 8px;
-            padding-right: 8px;
-            padding-bottom: 8px;
-            spacing: 8px;
-            // ============================================= library rail placeholder (sidebar overlays the stage)
-            Rectangle {
-                width: side.pinned ? SidebarMetrics.open : SidebarMetrics.rail;
-            }
+            padding-top: 4px;
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-bottom: 4px;
 
             VerticalLayout {
             horizontal-stretch: 1;
             spacing: 0px;
-            // ============================================= stage
+            // ============================================= page: Rig
+            if page == 0: VerticalLayout {
+            vertical-stretch: 1;
+            // ============================================= stage: tone header + signal chain
             stage := Rectangle {
-                // content height of the upper deck: tone header, chain, compact amp core
-                property <length> deck-h: 488px;
-                vertical-stretch: insp-open ? 0 : 1;
+                property <length> deck-h: 326px;
+                vertical-stretch: 0;
                 min-height: deck-h;
-                max-height: insp-open ? deck-h : 100000px;
-                border-radius: 6px;
+                max-height: deck-h;
+                border-radius: T.r-card;
                 background: T.bg;
-                border-width: 1px;
-                border-color: T.line;
                 clip: true;
 
-                if !has-selection: Text {
-                    text: "Wybierz brzmienie z biblioteki";
-                    color: T.text-3;
-                    font-family: T.mono;
-                    font-size: 13px;
-                    letter-spacing: 1px;
+                if !has-selection: VerticalLayout {
+                    alignment: center;
+                    spacing: 14px;
+                    Text {
+                        text: "No preset loaded";
+                        horizontal-alignment: center;
+                        color: T.text;
+                        font-size: 18px;
+                        font-weight: 700;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        Btn {
+                            primary: true;
+                            text: "Browse presets";
+                            clicked => { show-picker = true; }
+                        }
+                        Btn {
+                            text: "Start from a starter rig";
+                            clicked => { page-picked(3); }
+                        }
+                    }
                 }
                 if has-selection: VerticalLayout {
-                    padding-left: 22px;
-                    padding-right: 22px;
-                    padding-top: 14px;
-                    padding-bottom: 16px;
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-top: 16px;
+                    padding-bottom: 18px;
                     spacing: 0px;
 
                     // ---------- tone header
                     HorizontalLayout {
-                        height: 64px;
-                        spacing: 8px;
+                        height: 58px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 2px;
+                                IconBtn {
+                                    icon: Icons.chevron-left;
+                                    tip: "Previous preset";
+                                    clicked => { tone-step(-1); }
+                                }
+                                IconBtn {
+                                    icon: Icons.chevron-right;
+                                    tip: "Next preset";
+                                    clicked => { tone-step(1); }
+                                }
+                            }
+                        }
+                        Rectangle { width: 2px; }
                         VerticalLayout {
                             horizontal-stretch: 1;
                             alignment: center;
@@ -754,7 +614,7 @@ export component MainWindow inherits Window {
                                     text: ed-name;
                                     color: T.text;
                                     font-family: T.display;
-                                    font-size: 26px;
+                                    font-size: 24px;
                                     font-weight: 700;
                                     single-line: true;
                                     accepted => {
@@ -768,37 +628,55 @@ export component MainWindow inherits Window {
                                         d: Icons.star;
                                         size: 18px;
                                         filled: ed-fav;
-                                        tint: ed-fav ? T.accent : T.text-3;
+                                        tint: ed-fav ? T.accent : T.text-2;
                                     }
                                     TouchArea {
                                         mouse-cursor: pointer;
                                         clicked => { toggle-fav(); }
                                     }
                                 }
+                                // quick preset picker window
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: bt.preferred-width + 34px;
+                                        height: 28px;
+                                        border-radius: 14px;
+                                        background: bta.has-hover ? T.hover : T.panel-hi;
+                                        bt := Text {
+                                            x: 12px;
+                                            text: "Browse";
+                                            color: T.text-2;
+                                            font-size: 12px;
+                                            font-weight: 600;
+                                        }
+                                        Icon {
+                                            x: parent.width - 22px;
+                                            d: Icons.chevron-down;
+                                            size: 14px;
+                                            tint: T.text-2;
+                                        }
+                                        bta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { show-picker = true; }
+                                        }
+                                    }
+                                }
                                 Rectangle { horizontal-stretch: 1; }
                             }
                             HorizontalLayout {
-                                spacing: 14px;
+                                spacing: 8px;
                                 Text {
                                     text: ed-amp-name;
                                     color: T.text-2;
-                                    font-family: T.mono;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: "FX " + ed-fx-on + "/" + ed-fx-all;
-                                    color: T.text-3;
-                                    font-family: T.mono;
-                                    font-size: 11px;
+                                    font-size: 13px;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     horizontal-stretch: 1;
-                                    text: ed-origin;
-                                    color: T.text-3;
-                                    font-size: 11px;
-                                    overflow: elide;
+                                    text: "·   " + ed-fx-on + " of " + ed-fx-all + " effects on" + (ed-tags == "" ? "" : "   ·   #" + ed-tags);
+                                    color: T.text-2;
+                                    font-size: 13px;
                                     vertical-alignment: center;
                                 }
                             }
@@ -809,13 +687,59 @@ export component MainWindow inherits Window {
                                 spacing: 6px;
                                 Btn {
                                     compact: true;
-                                    text: "Cofnij";
+                                    text: "Revert";
                                     clicked => { revert(); }
                                 }
                                 Btn {
                                     compact: true;
-                                    text: "Zapisz";
+                                    text: "Save";
                                     clicked => { save(); }
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 2px;
+                                IconBtn {
+                                    icon: Icons.undo;
+                                    enabled: can-undo;
+                                    tip: "Undo (Ctrl+Z)";
+                                    clicked => { undo(); }
+                                }
+                                IconBtn {
+                                    icon: Icons.redo;
+                                    enabled: can-redo;
+                                    tip: "Redo (Ctrl+Y)";
+                                    clicked => { redo(); }
+                                }
+                            }
+                        }
+                        // A/B snapshot compare lives with the preset it compares
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                height: 32px;
+                                width: ab.preferred-width + 6px;
+                                border-radius: 9px;
+                                background: T.well;
+                                ab := HorizontalLayout {
+                                    x: 3px;
+                                    y: 3px;
+                                    height: 26px;
+                                    spacing: 2px;
+                                    Pick {
+                                        text: "A";
+                                        width: 36px;
+                                        active: ab-slot == 0;
+                                        clicked => { ab-picked(0); }
+                                    }
+                                    Pick {
+                                        text: ab-has-b ? "B" : "+B";
+                                        width: 36px;
+                                        active: ab-slot == 1;
+                                        clicked => { ab-picked(1); }
+                                    }
                                 }
                             }
                         }
@@ -824,7 +748,7 @@ export component MainWindow inherits Window {
                             Btn {
                                 primary: true;
                                 compact: true;
-                                text: ed-live ? "Gra na wzmacniaczu" : "Zagraj na wzmacniaczu";
+                                text: ed-live ? "Playing on amp" : "Play on amp";
                                 clicked => { audition(); }
                             }
                         }
@@ -833,6 +757,7 @@ export component MainWindow inherits Window {
                             more-btn := IconBtn {
                                 icon: Icons.more;
                                 filled: true;
+                                tip: "Preset actions";
                                 clicked => { more-menu.show(); }
                             }
                         }
@@ -840,30 +765,34 @@ export component MainWindow inherits Window {
                             x: parent.width - 236px;
                             y: 54px;
                             width: 236px;
-                            height: 5 * 36px + 12px;
+                            height: 6 * 36px + 12px;
                             Menu {
                                 VerticalLayout {
                                     padding: 6px;
                                     MenuItem {
-                                        text: "Zapisz do kanału wzmacniacza…";
+                                        text: "Write to amp channel…";
                                         enabled: connected;
                                         clicked => { show-slot-picker = true; more-menu.close(); }
                                     }
                                     MenuItem {
-                                        text: "Duplikuj";
+                                        text: "Edit tags…";
+                                        clicked => { show-tags = true; more-menu.close(); }
+                                    }
+                                    MenuItem {
+                                        text: "Duplicate";
                                         clicked => { save-copy(); more-menu.close(); }
                                     }
                                     MenuItem {
-                                        text: "Eksportuj .tsl";
+                                        text: "Export .tsl";
                                         clicked => { export-tone(); more-menu.close(); }
                                     }
                                     MenuItem {
-                                        text: "Cofnij zmiany";
+                                        text: "Revert changes";
                                         enabled: ed-dirty;
                                         clicked => { revert(); more-menu.close(); }
                                     }
                                     MenuItem {
-                                        text: "Usuń (do kosza)";
+                                        text: "Delete (move to trash)";
                                         danger: true;
                                         clicked => { delete-tone(); more-menu.close(); }
                                     }
@@ -879,42 +808,36 @@ export component MainWindow inherits Window {
                         height: 22px;
                         spacing: 10px;
                         Text {
-                            text: "SIGNAL CHAIN";
-                            color: T.text-2;
-                            font-family: T.mono;
-                            font-weight: 700;
-                            font-size: 10.5px;
-                            letter-spacing: 1.5px;
+                            text: "Signal chain";
+                            color: T.text;
+                            font-weight: 600;
+                            font-size: 13px;
                             vertical-alignment: center;
                         }
                         Text {
                             text: ed-chain-name;
                             color: T.text-3;
-                            font-family: T.mono;
-                            font-size: 10.5px;
+                            font-size: 12px;
                             vertical-alignment: center;
                         }
                         Text {
                             horizontal-stretch: 1;
                             horizontal-alignment: right;
                             vertical-alignment: center;
-                            font-size: 11px;
-                            text: drag-from >= 0 ? (drop-ok[gap] ? "puść, aby przestawić" : "tej kolejności Katana nie obsługuje") : "przeciągnij blok, aby zmienić kolejność";
+                            font-size: 12px;
+                            text: drag-from >= 0 ? (drop-ok[gap] ? "Release to reorder" : "The Katana can't run blocks in this order") : "Drag blocks to reorder";
                             color: drag-from < 0 ? T.text-3 : drop-ok[gap] ? T.led-green : T.led-red;
                         }
                     }
-                    Rectangle { height: 6px; }
+                    Rectangle { height: 8px; }
 
                     // ---------- signal chain
                     deck := Rectangle {
-                        height: ph + 32px;
-                        border-radius: 6px;
-                        background: T.well;
-                        border-width: 1px;
-                        border-color: T.line;
+                        height: ph + 30px;
                         clip: true;
                         Flickable {
-                        content-width: Math.max(self.width, 128px + pedals.length * (pw + 10px));
+                        // scroll only when even the narrowest boxes do not fit
+                        content-width: Math.max(self.width, 2 * rail-w + pedals.length * (72px + 14px));
                         interactive: drag-from < 0;
                     board := Rectangle {
                         x: 0;
@@ -923,36 +846,36 @@ export component MainWindow inherits Window {
                         height: parent.height;
                         init => { root.board-w = self.width; }
                         changed width => { root.board-w = self.width; }
-                        property <length> py: (self.height - ph) / 2 + 4px;
-                        // cables run at the pedals' jack height
-                        property <length> wy: py + 33px;
+                        property <length> py: (self.height - ph) / 2 + 2px;
+                        // cables run between the side jacks
+                        property <length> wy: py + jack-y;
                         ChainNode {
-                            x: 12px;
-                            y: board.wy - 19px;
+                            x: 4px;
+                            y: board.wy - 13px;
                             text: "IN";
                             hot: ed-live;
                         }
                         ChainNode {
-                            x: board.width - 52px;
-                            y: board.wy - 19px;
+                            x: board.width - 44px;
+                            y: board.wy - 13px;
                             text: "OUT";
                             hot: ed-live;
                         }
                         if pedals.length > 0: Wire {
-                            x: 52px;
-                            y: board.wy;
-                            width: left + ps / 2 - 52px;
+                            x: 44px;
+                            y: board.wy - 1.5px;
+                            width: left + ps / 2 - 44px;
                             hot: ed-live;
                         }
                         if pedals.length > 0: Wire {
                             x: left + ps / 2 + (pedals.length - 1) * pitch + pw;
-                            y: board.wy;
-                            width: board.width - 52px - self.x;
+                            y: board.wy - 1.5px;
+                            width: board.width - 44px - self.x;
                             hot: ed-live;
                         }
                         for c[i] in Math.max(0, pedals.length - 1): Wire {
                             x: left + ps / 2 + i * pitch + pw;
-                            y: board.wy;
+                            y: board.wy - 1.5px;
                             width: ps;
                             hot: ed-live;
                         }
@@ -960,12 +883,14 @@ export component MainWindow inherits Window {
                             x: left + ps / 2 + i * pitch;
                             y: board.py;
                             width: pw;
+                            height: ph;
                             p: p;
                             selected: i == pedal-selected && insp-open;
                             ghost: i == drag-from;
                             clicked => { pedal-clicked(i); }
                             toggled => { pedal-toggled(i); }
-                            knob(k, v) => { pedal-knob(i, k, v); }
+                            knob-set(k, x) => { pedal-knob-set(i, k, x); }
+                            knob-step(k, d) => { pedal-knob-step(i, k, d); }
                             drag-start => {
                                 drag-from = i;
                                 drag-x = self.x + pw / 2;
@@ -979,6 +904,7 @@ export component MainWindow inherits Window {
                         }
                         if drag-from >= 0: Rectangle {
                             for ok[g] in drop-ok: Rectangle {
+                                border-radius: 1px;
                                 x: left + g * pitch - 1px;
                                 y: board.py - 4px;
                                 width: 2px;
@@ -990,48 +916,31 @@ export component MainWindow inherits Window {
                             x: drag-x - pw / 2;
                             y: board.py;
                             width: pw;
+                            height: ph;
                             p: pedals[drag-from];
                             lifted: true;
                         }
                     }
                         }
                     }
-
-                    Rectangle { height: 12px; }
-
-                    // ---------- amp core
-                    AmpCore {
-                        knobs: knobs;
-                        dsp-voicing: dsp-voicing;
-                        dsp-voicing-picked(v) => { dsp-voicing-picked(v); }
-                        family: ed-amp-family;
-                        variation: ed-amp-var;
-                        amp-name: ed-amp-name;
-                        live: ed-live;
-                        connected: connected;
-                        compact: insp-open;
-                        knob-changed(i, v) => { knob-changed(i, v); }
-                        family-picked(f) => { amp-family(f); }
-                        variation-toggled(v) => { amp-variation(v); }
-                    }
                     Rectangle { vertical-stretch: 1; }
                 }
             }
 
-            // ---------- effect editor: docked under the stage, nothing gets covered
+            // ---------- inspector: docked under the stage, always shows the selected block
             dock := Rectangle {
-                vertical-stretch: insp-open ? 1 : 0;
-                min-height: insp-open ? 316px : 0px;
-                max-height: insp-open ? 100000px : 0px;
+                vertical-stretch: 1;
+                min-height: practice-open ? 208px : 280px;
                 clip: true;
-                Inspector {
+                if insp-open: Inspector {
                     x: 0;
-                    y: 8px;
+                    y: 12px;
                     width: parent.width;
-                    height: parent.height - 8px;
+                    height: parent.height - 12px;
                     title: insp-title;
                     subtitle: insp-subtitle;
                     hue: insp-hue;
+                    kind: insp-kind;
                     ink: insp-ink;
                     has-sw: insp-has-sw;
                     on: insp-on;
@@ -1041,17 +950,30 @@ export component MainWindow inherits Window {
                     section: insp-section;
                     params: insp-params;
                     params-h: insp-params-h;
-                    close => { insp-close(); }
+                    is-amp: insp-is-amp;
+                    amp-family: ed-amp-family;
+                    amp-var: ed-amp-var;
+                    dsp-voicing: dsp-voicing;
+                    extra: insp-extra;
+                    eq-curve: insp-eq-curve;
+                    eq-fill: insp-eq-fill;
+                    delay-ms: insp-delay-ms;
+                    bpm: bpm;
+                    delay-sync(ms) => { insp-delay-sync(ms); }
+                    tap => { root.tap(); }
                     toggle(v) => { insp-toggle(v); }
                     variant-picked(i) => { insp-variant-picked(i); }
                     type-request => { insp-type-request(); }
                     section-picked(i) => { insp-section-picked(i); }
                     param(i, v) => { insp-param(i, v); }
                     enum-request(i) => { insp-enum-request(i); }
+                    family-picked(f) => { amp-family(f); }
+                    variation-toggled(v) => { amp-variation(v); }
+                    dsp-voicing-picked(v) => { dsp-voicing-picked(v); }
                 }
             }
 
-            // ---------- amp channels, under the stage (only when an amp is there)
+            // ---------- amp channels, under the inspector (only when an amp is there)
             if connected: HorizontalLayout {
                 height: 48px;
                 padding-top: 8px;
@@ -1063,6 +985,94 @@ export component MainWindow inherits Window {
                     pull => { pull-slot(i); }
                     push => { if has-selection { confirm-slot = i; } }
                 }
+            }
+
+            }
+
+            // ============================================= page: Library
+            if page == 1: LibraryPage {
+                vertical-stretch: 1;
+                nav-selected: nav-selected;
+                tones: tones;
+                selected-index: selected-index;
+                tag: tag;
+                connected: connected;
+                user-tags: user-tags;
+                sort: sort;
+                sort-picked(v) => { root.sort-picked(v); }
+                query <=> root.query;
+                nav-clicked(id) => { root.nav-clicked(id); }
+                search(q) => { root.search(q); }
+                tag-picked(t) => { root.tag-picked(t); }
+                import-request => { show-import = true; }
+                backup-amp => { root.backup-amp(); }
+                export-list => { root.export-list(); }
+                tone-clicked(i) => { root.tone-clicked(i); }
+                tone-opened(i) => {
+                    root.tone-clicked(i);
+                    root.page-picked(0);
+                }
+                tone-fav(i) => { root.tone-fav(i); }
+                tone-add(i) => { add-tone = i; }
+            }
+
+            // ============================================= page: Setlists (collections | numbered songs)
+            if page == 2: SetlistsPage {
+                vertical-stretch: 1;
+                nav: nav;
+                nav-selected: nav-selected;
+                nav-title: nav-title;
+                tones: tones;
+                selected-index: selected-index;
+                has-selection: has-selection;
+                nav-clicked(id) => { root.nav-clicked(id); }
+                set-new => { root.set-new(); }
+                set-rename(n) => { root.set-rename(n); }
+                set-add-current => { root.set-add-current(); }
+                live => { live-open = true; }
+                export-list => { root.export-list(); }
+                tone-clicked(i) => { root.tone-clicked(i); }
+                tone-opened(i) => {
+                    root.tone-clicked(i);
+                    root.page-picked(0);
+                }
+                song-move(i, d) => { root.song-move(i, d); }
+                song-remove(i) => { root.song-remove(i); }
+            }
+
+            // ============================================= page: Starter rigs (ready-made chains)
+            if page == 3: StartersPage {
+                vertical-stretch: 1;
+                templates: templates;
+                used(i) => { template-use(i); }
+            }
+
+
+            // ---------- status bar + practice suite drawer (looper, drums, tap, .wav loaders)
+            PracticeDrawer {
+                open <=> root.practice-open;
+                engine: !T.hw && audio-running;
+                loop-state: loop-state;
+                loop-progress: loop-progress;
+                loop-time: loop-time;
+                drum-on: drum-on;
+                drum-pattern: drum-pattern;
+                bpm: bpm;
+                drum-step: drum-step;
+                ir-name: ir-name;
+                di-name: di-name;
+                show-tuner: !hw-mode;
+                tuner-note: tuner-note;
+                tuner-cents: tuner-cents;
+                tuner-active: tuner-active;
+                toggled(o) => { practice-toggled(o); }
+                loop-action(a) => { root.loop-action(a); }
+                drum-toggled(o) => { root.drum-toggled(o); }
+                drum-pattern-picked(i) => { root.drum-pattern-picked(i); }
+                bpm-changed(b) => { root.bpm-changed(b); }
+                tap => { root.tap(); }
+                load-ir(f) => { root.load-ir(f); }
+                load-di(f) => { root.load-di(f); }
             }
             }
         }
@@ -1077,35 +1087,32 @@ export component MainWindow inherits Window {
         height: 0;
         init => { self.focus(); }
         key-pressed(e) => {
+            if e.modifiers.control && (e.text == "k" || e.text == "K") {
+                show-picker = true;
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "1" || e.text == "2" || e.text == "3" || e.text == "4") {
+                page-picked(e.text == "1" ? 0 : e.text == "2" ? 1 : e.text == "3" ? 2 : 3);
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "z" || e.text == "Z") {
+                if e.modifiers.shift { redo(); } else { undo(); }
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "y" || e.text == "Y") {
+                redo();
+                return accept;
+            }
+            if e.modifiers.control && (e.text == "l" || e.text == "L") {
+                live-open = true;
+                return accept;
+            }
             if e.text == " " {
                 transport();
                 return accept;
             }
             reject
         }
-    }
-
-    // ================================================= library sidebar (over the stage, under dialogs)
-    side := LibrarySidebar {
-        x: 0;
-        y: 53px;
-        height: root.height - 53px;
-        nav: nav;
-        nav-selected: nav-selected;
-        nav-title: nav-title;
-        tones: tones;
-        selected-index: selected-index;
-        essentials: essentials;
-        connected: connected;
-        tag: tag;
-        tag-picked(t) => { tag-picked(t); }
-        pinned <=> root.sidebar-pinned;
-        search(q) => { search(q); }
-        nav-clicked(id) => { nav-clicked(id); }
-        tone-clicked(i) => { tone-clicked(i); }
-        tone-activated(i) => { tone-activated(i); }
-        tone-fav(i) => { tone-fav(i); }
-        essential-clicked(id) => { essential-clicked(id); }
     }
 
     // ================================================= overlays
@@ -1147,165 +1154,96 @@ export component MainWindow inherits Window {
         }
     }
 
-    if show-slot-picker: Rectangle {
-        background: #000000b0;
-        TouchArea {
-            clicked => { show-slot-picker = false; }
+    if show-picker: Picker {
+        nav-selected: nav-selected;
+        nav-title: nav-title;
+        essentials: essentials;
+        tones: tones;
+        selected-index: selected-index;
+        query <=> root.query;
+        close => { show-picker = false; }
+        search(q) => { root.search(q); }
+        nav-clicked(id) => { root.nav-clicked(id); }
+        essential-clicked(id) => {
+            root.essential-clicked(id);
+            show-picker = false;
         }
-        Menu {
-            width: 572px;
-            height: 236px;
-            TouchArea { }
-            Text {
-                x: 24px;
-                y: 22px;
-                text: "Zapisz „" + ed-name + "” do kanału";
-                font-family: T.display;
-                font-size: 22px;
-                font-weight: 700;
-                color: T.text;
-            }
-            for sl[i] in slots: Rectangle {
-                visible: i > 0;
-                x: 24px + mod(i - 1, 4) * 132px;
-                y: 72px + floor((i - 1) / 4) * 66px;
-                width: 124px;
-                height: 56px;
-                border-radius: 8px;
-                background: pta.has-hover ? T.hover : #ffffff08;
-                border-width: 1px;
-                border-color: pta.has-hover ? T.accent : transparent;
-                VerticalLayout {
-                    padding: 9px;
-                    padding-left: 12px;
-                    Text { text: sl.label; color: T.accent; font-family: T.display; font-weight: 700; font-size: 11px; }
-                    Text { text: sl.name; color: T.text-2; font-size: 12px; overflow: elide; }
-                }
-                pta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        show-slot-picker = false;
-                        confirm-slot = i;
-                    }
-                }
-            }
+        tone-clicked(i) => {
+            root.tone-clicked(i);
+            show-picker = false;
         }
     }
 
-    if confirm-slot >= 0: Rectangle {
-        background: #000000b0;
-        TouchArea {
-            clicked => { confirm-slot = -1; }
-        }
-        Menu {
-            width: 480px;
-            height: 210px;
-            TouchArea { }
-            VerticalLayout {
-                padding: 24px;
-                spacing: 12px;
-                Text {
-                    text: "Nadpisać kanał " + slots[confirm-slot].label + "?";
-                    font-family: T.display;
-                    font-size: 24px;
-                    font-weight: 700;
-                    color: T.text;
-                }
-                Text {
-                    text: "„" + slots[confirm-slot].name + "” zostanie zastąpione przez „" + ed-name + "”. Obecna zawartość kanału trafi najpierw do biblioteki (Kopie wzmacniacza).";
-                    wrap: word-wrap;
-                    color: T.text-2;
-                    vertical-stretch: 1;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
-                    Btn {
-                        text: "Anuluj";
-                        clicked => { confirm-slot = -1; }
-                    }
-                    Btn {
-                        primary: true;
-                        text: "Zapisz do " + slots[confirm-slot].label;
-                        clicked => {
-                            write-slot(confirm-slot);
-                            confirm-slot = -1;
-                        }
-                    }
-                }
-            }
+    if show-slot-picker: SlotPicker {
+        name: ed-name;
+        slots: slots;
+        dismissed => { show-slot-picker = false; }
+        picked(i) => {
+            show-slot-picker = false;
+            confirm-slot = i;
         }
     }
 
-    if show-import: Rectangle {
-        background: #000000b0;
-        TouchArea {
-            clicked => { show-import = false; }
+    if confirm-slot >= 0: ConfirmWrite {
+        slot: slots[confirm-slot];
+        name: ed-name;
+        dismissed => { confirm-slot = -1; }
+        confirmed => {
+            write-slot(confirm-slot);
+            confirm-slot = -1;
         }
-        Menu {
-            width: 620px;
-            height: 290px;
-            TouchArea { }
-            VerticalLayout {
-                padding: 24px;
-                spacing: 12px;
-                Text {
-                    text: "Import brzmień";
-                    font-family: T.display;
-                    font-size: 24px;
-                    font-weight: 700;
-                    color: T.text;
-                }
-                Text {
-                    text: import-hint;
-                    wrap: word-wrap;
-                    color: T.text-2;
-                }
-                Btn {
-                    primary: true;
-                    text: "Importuj z BOSS Tone Studio (Windows)";
-                    clicked => {
-                        import-windows();
-                        show-import = false;
-                    }
-                }
-                Label { text: "albo plik lub folder .tsl"; }
-                HorizontalLayout {
-                    spacing: 8px;
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        height: 36px;
-                        border-radius: T.r;
-                        background: T.bg;
-                        border-width: 1px;
-                        border-color: path-in.has-focus ? T.accent-lo : T.line;
-                        path-in := TextInput {
-                            x: 10px;
-                            width: parent.width - 20px;
-                            color: T.text;
-                            single-line: true;
-                            vertical-alignment: center;
-                            accepted => {
-                                import-path(self.text);
-                                show-import = false;
-                            }
-                        }
-                    }
-                    Btn {
-                        text: "Importuj";
-                        clicked => {
-                            import-path(path-in.text);
-                            show-import = false;
-                        }
-                    }
-                }
-            }
+    }
+
+    if add-tone >= 0 && add-tone < tones.length: AddToSetlist {
+        name: tones[add-tone].name;
+        nav: nav;
+        n-sets: set-count;
+        dismissed => { add-tone = -1; }
+        picked(id) => {
+            tone-add-to(add-tone, id);
+            add-tone = -1;
+        }
+    }
+
+    if show-tags: TagsDialog {
+        name: ed-name;
+        tags: ed-tags;
+        dismissed => { show-tags = false; }
+        saved(t) => {
+            set-tags(t);
+            show-tags = false;
+        }
+    }
+
+    if show-import: ImportDialog {
+        hint: import-hint;
+        dismissed => { show-import = false; }
+        import-windows => {
+            root.import-windows();
+            show-import = false;
+        }
+        import-path(p) => {
+            root.import-path(p);
+            show-import = false;
+        }
+    }
+
+
+    if live-open: LiveView {
+        tones: tones;
+        selected-index: selected-index;
+        list-name: nav-title;
+        connected: connected;
+        step(d) => { tone-step(d); }
+        close => {
+            live-open = false;
+            keys.focus();
         }
     }
 
     if toast != "": Rectangle {
         x: (root.width - self.width) / 2;
-        y: root.height - self.height - (connected ? 76px : 22px);
+        y: root.height - self.height - (connected ? 96px : 50px);
         width: tt.preferred-width + 40px;
         height: 40px;
         border-radius: 20px;

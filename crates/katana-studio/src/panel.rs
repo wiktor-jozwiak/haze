@@ -50,7 +50,8 @@ pub struct NodeDef {
     pub ty: Option<ParamRef>,
     pub variant: Option<Variant>,
     pub sections: Vec<Section>,
-    /// preferred mini-knobs on the pedal (by param name), max 3
+    /// preferred knobs on the pedal face (by param name), max 3; the rest is filled in
+    /// from the first numeric params of the block's current type
     pub knob_names: &'static [&'static str],
 }
 
@@ -87,7 +88,7 @@ impl Panel {
         use Node::*;
         let nodes = vec![
             NodeDef {
-                node: Ns, title: "NOISE GATE", hue: rgb(0x5d6166),
+                node: Ns, title: "GATE", hue: rgb(0x5d6166),
                 sw: Some(p("Patch_1", "PRM_NS1_SW")), ty: None, variant: None,
                 sections: vec![sec("NOISE SUPPRESSOR", "Patch_1", 34..38, Filter::None)],
                 knob_names: &["THRESHOLD", "RELEASE"],
@@ -125,12 +126,13 @@ impl Panel {
                     sec("AMP", "Patch_0", 16..48, Filter::None),
                     sec("SOLO", "Patch_Mk2V2", 0..999, Filter::None),
                     sec("CONTOUR", "Contour(1)", 0..999, Filter::None),
-                    sec("GLOBALNE", "Patch_1", 38..999, Filter::None),
+                    sec("GLOBAL", "Patch_1", 38..999, Filter::None),
                 ],
-                knob_names: &["GAIN", "LEVEL"],
+                knob_names: &[],
             },
             NodeDef {
-                node: SendReturn, title: "SEND/RETURN", hue: rgb(0x46505c),
+                // FX LOOP: the Katana's SEND/RETURN jacks
+                node: SendReturn, title: "FX LOOP", hue: rgb(0x46505c),
                 sw: Some(p("Patch_1", "PRM_SEND_RETURN_SW")), ty: Some(p("Patch_1", "PRM_SEND_RETURN_MODE")), variant: None,
                 sections: vec![sec("SEND/RETURN", "Patch_1", 30..34, Filter::None)],
                 knob_names: &["SEND LEVEL", "RETURN LEVEL"],
@@ -167,6 +169,33 @@ impl Panel {
         Panel { knobs, amp_type: p("Patch_0", "PRM_PREAMP_A_TYPE"), nodes, routing_block: bi("Patch_2") }
     }
 
+    /// Up to three params for the pedal face.
+    pub fn pedal_knobs(&self, d: &NodeDef, patch: &Patch) -> Vec<ParamRef> {
+        if d.node == Node::Amp {
+            // amp head: gain, middle, volume
+            return [0, 2, 5].iter().map(|&i| self.knobs[i].r).collect();
+        }
+        let all = self.section_params(&d.sections[0], patch);
+        let numeric: Vec<ParamRef> =
+            all.into_iter().filter(|r| r.param.labels.is_empty() && r.param.max - r.param.min >= 10 && r.param.name != "SW").collect();
+        let mut out: Vec<ParamRef> = vec![];
+        for name in d.knob_names {
+            if let Some(r) = numeric.iter().find(|r| r.param.name == *name && !out.iter().any(|o| std::ptr::eq(o.param, r.param))) {
+                out.push(*r);
+            }
+        }
+        for r in &numeric {
+            if out.len() >= 3 {
+                break;
+            }
+            if !out.iter().any(|o| std::ptr::eq(o.param, r.param)) && r.param.name != "DIRECT MIX" {
+                out.push(*r);
+            }
+        }
+        out.truncate(3);
+        out
+    }
+
     pub fn node(&self, n: Node) -> &NodeDef {
         self.nodes.iter().find(|d| d.node == n).expect("node def")
     }
@@ -197,29 +226,6 @@ impl Panel {
             .map(|d: &'static ParamDef| ParamRef { block: s.block, param: d })
             .collect()
     }
-
-    /// Up to three params for the pedal face.
-    pub fn pedal_knobs(&self, d: &NodeDef, patch: &Patch) -> Vec<ParamRef> {
-        let all = self.section_params(&d.sections[0], patch);
-        let numeric: Vec<ParamRef> =
-            all.into_iter().filter(|r| r.param.labels.is_empty() && r.param.max - r.param.min >= 10 && r.param.name != "SW").collect();
-        let mut out: Vec<ParamRef> = vec![];
-        for name in d.knob_names {
-            if let Some(r) = numeric.iter().find(|r| r.param.name == *name && !out.iter().any(|o| std::ptr::eq(o.param, r.param))) {
-                out.push(*r);
-            }
-        }
-        for r in &numeric {
-            if out.len() >= 3 {
-                break;
-            }
-            if !out.iter().any(|o| std::ptr::eq(o.param, r.param)) && r.param.name != "DIRECT MIX" {
-                out.push(*r);
-            }
-        }
-        out.truncate(3);
-        out
-    }
 }
 
 /// Human group name from a BTS param id: PRM_PREAMP_A_GAIN → "AMP".
@@ -238,27 +244,37 @@ pub fn group_of(d: &ParamDef) -> String {
     }
 }
 
-/// Short label for a pedal mini-knob.
+/// Short label under a pedal knob (fits ~30px at 9px).
 pub fn short(name: &str) -> String {
     match name {
-        "EFFECT LEVEL" => "LEVEL".into(),
-        "DELAY TIME" => "TIME".into(),
-        "REVERB TIME" => "TIME".into(),
-        "PEDAL POS" => "PEDAL".into(),
-        "SEND LEVEL" => "SEND".into(),
-        "RETURN LEVEL" => "RETURN".into(),
-        "THRESHOLD" => "THRESH".into(),
-        "SUSTAIN" => "SUST".into(),
-        "ATTACK" => "ATK".into(),
-        "FEEDBACK" => "FDBK".into(),
-        "FREQUENCY" => "FREQ".into(),
-        "RELEASE" => "REL".into(),
-        "PRE DELAY" => "PRE".into(),
-        "LOW GAIN" => "LOW".into(),
-        "HIGH GAIN" => "HIGH".into(),
-        "LOW-MID GAIN" => "LO-M".into(),
-        "HIGH-MID GAIN" => "HI-M".into(),
-        n => n.split_whitespace().last().unwrap_or(n).chars().take(5).collect(),
+        "EFFECT LEVEL" | "LEVEL" => "Level".into(),
+        "DELAY TIME" | "REVERB TIME" => "Time".into(),
+        "PEDAL POS" => "Pedal".into(),
+        "SEND LEVEL" => "Send".into(),
+        "RETURN LEVEL" => "Return".into(),
+        "THRESHOLD" => "Thresh".into(),
+        "SUSTAIN" => "Sust".into(),
+        "GAIN" => "Gain".into(),
+        "MIDDLE" => "Mid".into(),
+        "ATTACK" => "Attack".into(),
+        "FEEDBACK" => "Fdbk".into(),
+        "FREQUENCY" => "Freq".into(),
+        "RELEASE" => "Release".into(),
+        "PRE DELAY" => "Pre".into(),
+        "LOW GAIN" => "Low".into(),
+        "HIGH GAIN" => "High".into(),
+        "LOW-MID GAIN" => "Lo-Mid".into(),
+        "HIGH-MID GAIN" => "Hi-Mid".into(),
+        "VOLUME" => "Vol".into(),
+        other => {
+            // multi-word names: the last word carries the meaning ("PEDAL MIN" → "Min")
+            let w = other.split([' ', '_']).filter(|w| !w.is_empty()).last().unwrap_or(other);
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().chain(c.flat_map(|x| x.to_lowercase())).take(7).collect(),
+                None => String::new(),
+            }
+        }
     }
 }
 

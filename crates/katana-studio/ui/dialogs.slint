@@ -1,0 +1,255 @@
+import { T } from "theme.slint";
+import { Btn, Label } from "widgets.slint";
+import { Slot } from "types.slint";
+import { NavItem } from "library.slint";
+import { ListView } from "std-widgets.slint";
+import { Menu, MenuItem } from "parts.slint";
+
+/// Modal scrim + centred card; a click on the scrim cancels.
+component Modal inherits Rectangle {
+    in property <length> card-w;
+    in property <length> card-h;
+    callback dismissed();
+    background: #000000b0;
+    TouchArea {
+        clicked => { root.dismissed(); }
+    }
+    Menu {
+        width: root.card-w;
+        height: root.card-h;
+        TouchArea { }
+        @children
+    }
+}
+
+/// "Write to amp channel" grid.
+export component SlotPicker inherits Modal {
+    in property <string> name;
+    in property <[Slot]> slots;
+    callback picked(int);
+    card-w: 572px;
+    card-h: 236px;
+    Text {
+        x: 24px;
+        y: 22px;
+        text: "Write “" + root.name + "” to channel";
+        font-family: T.display;
+        font-size: 22px;
+        font-weight: 700;
+        color: T.text;
+    }
+    for sl[i] in slots: Rectangle {
+        visible: i > 0;
+        x: 24px + mod(i - 1, 4) * 132px;
+        y: 72px + floor((i - 1) / 4) * 66px;
+        width: 124px;
+        height: 56px;
+        border-radius: 8px;
+        background: pta.has-hover ? T.hover : #ffffff08;
+        border-width: 1px;
+        border-color: pta.has-hover ? T.accent : transparent;
+        VerticalLayout {
+            padding: 9px;
+            padding-left: 12px;
+            Text { text: sl.label; color: T.accent; font-family: T.display; font-weight: 700; font-size: 11px; }
+            Text { text: sl.name; color: T.text-2; font-size: 12px; overflow: elide; }
+        }
+        pta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.picked(i); }
+        }
+    }
+}
+
+/// Overwrite confirmation for an amp channel.
+export component ConfirmWrite inherits Modal {
+    in property <Slot> slot;
+    in property <string> name;
+    callback confirmed();
+    card-w: 480px;
+    card-h: 210px;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Text {
+            text: "Overwrite channel " + slot.label + "?";
+            font-family: T.display;
+            font-size: 24px;
+            font-weight: 700;
+            color: T.text;
+        }
+        Text {
+            text: "“" + slot.name + "” will be replaced by “" + root.name + "”. The channel's current content is backed up to the library first (Amp backups).";
+            wrap: word-wrap;
+            color: T.text-2;
+            vertical-stretch: 1;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Btn {
+                text: "Cancel";
+                clicked => { root.dismissed(); }
+            }
+            Btn {
+                primary: true;
+                text: "Write to " + slot.label;
+                clicked => { root.confirmed(); }
+            }
+        }
+    }
+}
+
+/// Import from BOSS Tone Studio or a .tsl path.
+export component ImportDialog inherits Modal {
+    in property <string> hint;
+    callback import-windows();
+    callback import-path(string);
+    card-w: 620px;
+    card-h: 290px;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Text {
+            text: "Import presets";
+            font-family: T.display;
+            font-size: 24px;
+            font-weight: 700;
+            color: T.text;
+        }
+        Text {
+            text: root.hint;
+            wrap: word-wrap;
+            color: T.text-2;
+        }
+        Btn {
+            primary: true;
+            text: "Import from BOSS Tone Studio (Windows)";
+            clicked => { root.import-windows(); }
+        }
+        Label { text: "or a .tsl file / folder"; }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 36px;
+                border-radius: T.r;
+                background: T.bg;
+                border-width: 1px;
+                border-color: path-in.has-focus ? T.accent-lo : T.line;
+                path-in := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    color: T.text;
+                    single-line: true;
+                    vertical-alignment: center;
+                    accepted => { root.import-path(self.text); }
+                }
+            }
+            Btn {
+                text: "Import";
+                clicked => { root.import-path(path-in.text); }
+            }
+        }
+    }
+}
+
+/// "Add <preset> to setlist": the user's setlists, or a new one holding just this preset.
+export component AddToSetlist inherits Modal {
+    in property <string> name;
+    in property <[NavItem]> nav;
+    callback picked(string);
+    in property <int> n-sets;
+    card-w: 420px;
+    card-h: 132px + Math.min(6, Math.max(1, root.n-sets)) * 36px;
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        Text {
+            text: "Add “" + root.name + "” to";
+            font-family: T.display;
+            font-size: 18px;
+            font-weight: 700;
+            color: T.text;
+            overflow: elide;
+        }
+        ListView {
+            vertical-stretch: 1;
+            for it in nav: MenuItem {
+                height: it.kind == 2 ? 36px : 0px;
+                visible: it.kind == 2;
+                text: it.name + "   ·   " + it.count;
+                clicked => { root.picked(it.id); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Btn {
+                text: "Cancel";
+                clicked => { root.dismissed(); }
+            }
+            Btn {
+                primary: true;
+                text: "New setlist";
+                clicked => { root.picked(""); }
+            }
+        }
+    }
+}
+
+/// Free tags of a preset, comma separated ("worship, drop D, live").
+export component TagsDialog inherits Modal {
+    in property <string> name;
+    in property <string> tags;
+    callback saved(string);
+    card-w: 480px;
+    card-h: 214px;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Text {
+            text: "Tags for “" + root.name + "”";
+            font-family: T.display;
+            font-size: 20px;
+            font-weight: 700;
+            color: T.text;
+            overflow: elide;
+        }
+        Text {
+            text: "Comma separated. They show up as #chips in the Library and in search.";
+            color: T.text-2;
+            font-size: 12px;
+        }
+        Rectangle {
+            height: 38px;
+            border-radius: T.r;
+            background: T.bg;
+            border-width: 1px;
+            border-color: tin.has-focus ? T.accent-lo : T.line;
+            tin := TextInput {
+                x: 10px;
+                width: parent.width - 20px;
+                text: root.tags;
+                color: T.text;
+                single-line: true;
+                vertical-alignment: center;
+                init => { self.focus(); }
+                accepted => { root.saved(self.text); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Btn {
+                text: "Cancel";
+                clicked => { root.dismissed(); }
+            }
+            Btn {
+                primary: true;
+                text: "Save tags";
+                clicked => { root.saved(tin.text); }
+            }
+        }
+    }
+}

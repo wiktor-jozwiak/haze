@@ -1,0 +1,136 @@
+import { T } from "theme.slint";
+import { SearchField, Icons } from "widgets.slint";
+import { ToneRow, Chip, LibraryGrid } from "library.slint";
+import { ModeBtn, Well, ToolBtn, Menu, MenuItem } from "parts.slint";
+
+/// Library page: All/Favorites, search, style chips, toolbar and the preset card grid.
+export component LibraryPage inherits VerticalLayout {
+    in property <string> nav-selected;
+    in property <[ToneRow]> tones;
+    in property <int> selected-index;
+    in property <string> tag;
+    in property <bool> connected;
+    in property <[string]> user-tags;
+    /// 0 name, 1 recently edited, 2 amp
+    in property <int> sort;
+    callback sort-picked(int);
+    in-out property <string> query;
+    callback nav-clicked(string);
+    callback search(string);
+    callback tag-picked(string);
+    callback import-request();
+    callback backup-amp();
+    callback export-list();
+    callback tone-clicked(int);
+    callback tone-opened(int);
+    callback tone-fav(int);
+    callback tone-add(int);
+
+    padding-top: 6px;
+    spacing: 14px;
+    HorizontalLayout {
+        height: 36px;
+        spacing: 10px;
+        Well {
+            width: lib-seg.preferred-width + 6px;
+            lib-seg := HorizontalLayout {
+                x: 3px;
+                y: 3px;
+                height: 30px;
+                spacing: 2px;
+                ModeBtn {
+                    text: "All";
+                    led: T.accent;
+                    active: nav-selected == "all";
+                    clicked => { nav-clicked("all"); }
+                }
+                ModeBtn {
+                    text: "Favorites";
+                    led: T.accent;
+                    active: nav-selected == "fav";
+                    clicked => { nav-clicked("fav"); }
+                }
+            }
+        }
+        SearchField {
+            width: 280px;
+            height: 36px;
+            text <=> root.query;
+            edited(q) => { search(q); }
+        }
+        // style chips, then the user's own #tags; scrolls sideways instead of pushing the toolbar
+        Flickable {
+            horizontal-stretch: 1;
+            content-width: chips.preferred-width;
+            interactive: chips.preferred-width > self.width;
+            chips := HorizontalLayout {
+                spacing: 6px;
+                for t in [{ id: "", n: "All tones" }, { id: "clean", n: "Clean" }, { id: "crunch", n: "Crunch" },
+                          { id: "lead", n: "Lead" }, { id: "hi-gain", n: "Hi-Gain" }, { id: "ambient", n: "Ambient" }]: VerticalLayout {
+                    alignment: center;
+                    Chip {
+                        text: t.n;
+                        active: t.id == tag;
+                        clicked => { tag-picked(t.id); }
+                    }
+                }
+                if user-tags.length > 0: Rectangle { width: 6px; }
+                for u in user-tags: VerticalLayout {
+                    alignment: center;
+                    Chip {
+                        text: "#" + u;
+                        active: "#" + u == tag;
+                        clicked => { tag-picked("#" + u); }
+                    }
+                }
+            }
+        }
+        ToolBtn {
+            text: ["Sort: Name", "Sort: Recent", "Sort: Amp"][sort];
+            icon: Icons.chevron-down;
+            enabled: nav-selected == "all" || nav-selected == "fav";
+            clicked => { sort-menu.show(); }
+        }
+        ToolBtn {
+            text: "Import";
+            icon: Icons.import;
+            clicked => { import-request(); }
+        }
+        ToolBtn {
+            text: "Back up amp";
+            icon: Icons.backup;
+            enabled: connected;
+            clicked => { backup-amp(); }
+        }
+        ToolBtn {
+            text: "Export";
+            icon: Icons.export;
+            clicked => { export-list(); }
+        }
+    }
+    sort-menu := PopupWindow {
+        x: root.width - 470px;
+        y: 44px;
+        width: 210px;
+        height: 3 * 36px + 12px;
+        Menu {
+            VerticalLayout {
+                padding: 6px;
+                for o[i] in ["Name", "Recently edited", "Amp type"]: MenuItem {
+                    text: (i == sort ? "✓  " : "     ") + o;
+                    clicked => { sort-picked(i); }
+                }
+            }
+        }
+    }
+    LibraryGrid {
+        vertical-stretch: 1;
+        tones: tones;
+        selected-index: selected-index;
+        empty-text: nav-selected == "fav" ? "No favorites yet. Star a preset to add it here." : query != "" || tag != "" ? "No presets match this filter." : "No presets yet. Import them from BOSS Tone Studio or a .tsl file.";
+        clicked(i) => { tone-clicked(i); }
+        opened(i) => { tone-opened(i); }
+        fav(i) => { tone-fav(i); }
+        add(i) => { tone-add(i); }
+    }
+}

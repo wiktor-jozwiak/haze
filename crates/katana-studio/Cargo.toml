@@ -14,6 +14,8 @@ haze-dsp = { version = "0.1.0", path = "../haze-dsp" }
 katana-core = { path = "../katana-core" }
 katana-midi = { path = "../katana-midi" }
 libc = "0.2"
+# already in the tree via slint; golden PNGs of `haze snapshot-check`
+png = "0.18"
 # CPU software renderer only: no GL/Vulkan context, partial redraws, small RSS.
 slint = { version = "1.19", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
 

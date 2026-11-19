@@ -2311,6 +2311,7 @@ dependencies = [
  "katana-core",
  "katana-midi",
  "libc",
+ "png 0.18.1",
  "slint",
  "slint-build",
 ]

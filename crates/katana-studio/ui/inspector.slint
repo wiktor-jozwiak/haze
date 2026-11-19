@@ -1,9 +1,8 @@
-// Deep parameter inspector: rack module for the block selected in the signal chain.
-// Left: module header (category stripe, type selector, colour memory, bypass). Right: the
-// parameters on a grid of encoders. Cell positions come precomputed from Rust (col / py).
+// Parameter inspector for the block selected in the signal chain: the single place where
+// parameters are edited. One header row (identity, type, colour memory, tabs, power), then
+// the parameters on a grid of encoders. Cell positions come precomputed from Rust (col / py).
 import { T } from "theme.slint";
-import { Toggle, Icon, Icons } from "widgets.slint";
-import { Led } from "widgets.slint";
+import { Toggle, Icon, Icons, Tip, Led, Glyphs } from "widgets.slint";
 
 export struct ParamRow {
     group: string,
@@ -20,7 +19,8 @@ export struct ParamRow {
     py: float,  // top of the cell in px
 }
 
-/// Big knob: sprite + value arc in the enclosure colour, label above, value below.
+/// Encoder: value arc in the block colour, value inside the ring, label underneath.
+/// Drag (Shift = fine), wheel.
 component BigKnob inherits Rectangle {
     in property <ParamRow> p;
     in property <color> accent;
@@ -30,7 +30,7 @@ component BigKnob inherits Rectangle {
     property <length> start-y;
     property <bool> fine;
     property <bool> active: ta.pressed || ta.has-hover;
-    // arc geometry on a 64×64 grid, 0° = 12 o'clock, clockwise, -135°..+135°
+    // arc on a 64×64 grid, 0° = 12 o'clock, clockwise, -135°..+135°;
     // bipolar params (e.g. -20..+20 dB) grow the arc from the centre detent
     property <float> zero-t: p.min < 0 && p.max > 0 ? (0 - p.min) / (p.max - p.min) : 0;
     property <float> lo-t: Math.min(zero-t, t);
@@ -38,31 +38,23 @@ component BigKnob inherits Rectangle {
     property <float> a0: -135;
     property <float> s0: -135 + lo-t * 270;
     property <float> s1: -135 + hi-t * 270;
-    property <float> r: 29;
-    height: 112px;
+    property <float> r: 28;
+    height: 92px;
 
-    Text {
-        y: 0;
-        width: parent.width - 8px;
-        x: 4px;
-        text: p.name;
-        horizontal-alignment: center;
-        overflow: elide;
-        color: active ? T.text : T.text-2;
-        font-size: 12px;
-    }
     Rectangle {
         x: (parent.width - 64px) / 2;
-        y: 20px;
+        y: 0;
         width: 64px;
         height: 64px;
+        border-radius: 32px;
+        background: root.active ? #ffffff08 : transparent;
         Path {
             width: 64px;
             height: 64px;
             viewbox-width: 64;
             viewbox-height: 64;
-            stroke: #2A2D35;
-            stroke-width: 3px;
+            stroke: T.line-hi;
+            stroke-width: 4px;
             commands: "M " + (32 + r * Math.sin(a0 * 1deg)) + " " + (32 - r * Math.cos(a0 * 1deg))
                 + " A " + r + " " + r + " 0 1 1 " + (32 + r * Math.sin(135deg)) + " " + (32 - r * Math.cos(135deg));
         }
@@ -72,39 +64,31 @@ component BigKnob inherits Rectangle {
             viewbox-width: 64;
             viewbox-height: 64;
             stroke: root.accent;
-            stroke-width: 3px;
+            stroke-width: 4px;
             commands: "M " + (32 + r * Math.sin(s0 * 1deg)) + " " + (32 - r * Math.cos(s0 * 1deg))
                 + " A " + r + " " + r + " 0 " + ((hi-t - lo-t) * 270 > 180 ? 1 : 0) + " 1 " + (32 + r * Math.sin(s1 * 1deg)) + " " + (32 - r * Math.cos(s1 * 1deg));
         }
-        cap := Rectangle {
-            x: 12px;
-            y: 12px;
-            width: 40px;
-            height: 40px;
-            border-radius: 20px;
-            background: ta.pressed ? #1A1C22 : #20232A;
-            border-width: 1px;
-            border-color: root.active ? T.line-hi : T.line;
-            Rectangle {
-                property <angle> a: (-135 + root.t * 270) * 1deg;
-                x: 20px + 13px * sin(a) - 2px;
-                y: 20px - 13px * cos(a) - 2px;
-                width: 4px;
-                height: 4px;
-                border-radius: 2px;
-                background: ta.pressed ? root.accent : T.text;
-            }
+        Text {
+            width: 52px;
+            x: 6px;
+            text: p.display;
+            horizontal-alignment: center;
+            overflow: elide;
+            color: ta.pressed ? root.accent : T.text;
+            font-family: T.mono;
+            font-size: p.display.character-count > 5 ? 10.5px : 13px;
+            font-weight: 600;
         }
     }
     Text {
-        y: 88px;
-        width: parent.width;
-        text: p.display;
+        y: 70px;
+        width: parent.width - 8px;
+        x: 4px;
+        text: p.name;
         horizontal-alignment: center;
-        color: ta.pressed ? root.accent : T.text;
-        font-family: T.mono;
+        overflow: elide;
+        color: active ? T.text : T.text-2;
         font-size: 12px;
-        font-weight: 600;
     }
     ta := TouchArea {
         mouse-cursor: ns-resize;
@@ -127,14 +111,52 @@ component BigKnob inherits Rectangle {
     }
 }
 
-/// Grid cell for an on/off switch or a list choice: label on top like a knob, control below.
+/// Switch or list choice, on the same rhythm as `BigKnob`: control centred on the dial
+/// (y 32), label on the label baseline (y 70).
 component RowCell inherits Rectangle {
     in property <ParamRow> p;
     callback changed(int);
     callback enum-request;
-    height: 112px;
+    height: 92px;
+    if p.is-switch: Toggle {
+        x: (parent.width - self.width) / 2;
+        y: 32px - self.height / 2;
+        width: 48px;
+        height: 26px;
+        on: p.value != 0;
+        led: 1;
+        toggled(v) => { changed(v ? 1 : 0); }
+    }
+    if !p.is-switch: Rectangle {
+        x: 8px;
+        y: 32px - self.height / 2;
+        width: parent.width - 16px;
+        height: 36px;
+        border-radius: T.r;
+        background: eta.has-hover ? T.hover : T.panel-hi;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 10px;
+            Text {
+                text: p.display;
+                color: T.text;
+                font-size: 13px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            VerticalLayout {
+                alignment: center;
+                Icon { d: Icons.chevron-down; size: 14px; tint: T.text-2; }
+            }
+        }
+        eta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { enum-request(); }
+        }
+    }
     Text {
-        y: 0;
+        y: 70px;
         x: 4px;
         width: parent.width - 8px;
         text: p.name;
@@ -143,60 +165,136 @@ component RowCell inherits Rectangle {
         horizontal-alignment: center;
         overflow: elide;
     }
+}
+
+component Caption inherits Text {
+    color: T.text-2;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/// Segment of a pill-shaped segmented control. Disabled segments explain themselves on hover.
+component SegBtn inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <string> hint;
+    in property <color> accent: T.accent;
+    in property <bool> stretch: true;
+    callback clicked;
+    min-width: t.preferred-width + 24px;
+    horizontal-stretch: stretch ? 1 : 0;
+    height: 30px;
+    border-radius: 6px;
+    background: active ? accent : ta.has-hover && enabled ? T.hover : transparent;
+    animate background { duration: 100ms; }
+    t := Text {
+        text: root.text;
+        color: active ? T.accent-ink : enabled ? (ta.has-hover ? T.text : T.text-2) : T.text-off;
+        font-size: 12.5px;
+        font-weight: active ? 700 : 500;
+    }
+    ta := TouchArea {
+        mouse-cursor: root.enabled ? pointer : not-allowed;
+        clicked => { if root.enabled { root.clicked(); } }
+    }
+    if ta.has-hover && !enabled && hint != "": Tip {
+        x: (parent.width - self.width) / 2;
+        y: -30px;
+        text: root.hint;
+    }
+}
+
+component SegGroup inherits Rectangle {
+    height: 36px;
+    border-radius: 9px;
+    background: T.well;
     HorizontalLayout {
-        y: 34px;
-        height: 36px;
-        padding-left: 8px;
-        padding-right: 8px;
-        alignment: center;
-        if p.is-switch: VerticalLayout {
-            alignment: center;
-            Toggle {
-                on: p.value != 0;
-                led: 1;
-                toggled(v) => { changed(v ? 1 : 0); }
+        padding: 3px;
+        spacing: 2px;
+        @children
+    }
+}
+
+/// Amp tab header: mutually exclusive amp types, then modifiers that apply on top of a type.
+component AmpTypeBand inherits Rectangle {
+    in property <int> family;
+    in property <bool> variation;
+    /// PC-engine voicing picked that the Katana lacks (2 PUSHED, 6 MODERN), -1 none
+    in property <int> dsp-voicing: -1;
+    in property <color> accent;
+    callback family-picked(int);
+    callback variation-toggled(bool);
+    callback dsp-voicing-picked(int);
+
+    // label, Katana family index (-1 = PC DSP engine only), PC engine voicing index
+    property <[{n: string, f: int, d: int}]> types: [
+        { n: "Acoustic", f: 0, d: 0 }, { n: "Clean", f: 1, d: 1 }, { n: "Pushed", f: -1, d: 2 }, { n: "Crunch", f: 2, d: 3 },
+        { n: "Lead", f: 3, d: 4 }, { n: "Brown", f: 4, d: 5 }, { n: "Modern", f: -1, d: 6 },
+    ];
+
+    HorizontalLayout {
+        spacing: 24px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 8px;
+            Caption { text: "Amp type"; }
+            SegGroup {
+                for v in types: SegBtn {
+                    text: v.n;
+                    accent: root.accent;
+                    active: dsp-voicing >= 0 ? v.d == dsp-voicing : v.f >= 0 && v.f == family;
+                    enabled: v.f >= 0 || !T.hw;
+                    hint: "Standalone engine only";
+                    clicked => {
+                        if v.f >= 0 { family-picked(v.f); } else { dsp-voicing-picked(v.d); }
+                    }
+                }
             }
         }
-        if !p.is-switch: VerticalLayout {
-            alignment: center;
-            horizontal-stretch: 1;
+        VerticalLayout {
+            horizontal-stretch: 0;
+            spacing: 8px;
+            Caption { text: "Modifiers"; }
             Rectangle {
-                height: 34px;
-                border-radius: T.r;
-                background: eta.has-hover ? T.hover : T.well;
-                border-width: 1px;
-                border-color: eta.has-hover ? T.line-hi : T.line;
+                width: 150px;
+                height: 36px;
+                border-radius: 9px;
+                background: vta.has-hover ? T.hover : T.panel-hi;
                 HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 10px;
+                    padding-left: 14px;
+                    padding-right: 8px;
+                    spacing: 8px;
                     Text {
-                        text: p.display;
-                        color: T.text;
-                        font-size: 13px;
+                        text: "Variation";
+                        color: variation ? T.text : T.text-2;
+                        font-size: 12.5px;
+                        font-weight: 600;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
-                        overflow: elide;
                     }
                     VerticalLayout {
                         alignment: center;
-                        Icon { d: Icons.chevron-down; size: 14px; tint: T.text-3; }
+                        Toggle {
+                            on: variation;
+                            toggled(v) => { variation-toggled(v); }
+                        }
                     }
                 }
-                eta := TouchArea {
+                vta := TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { enum-request(); }
+                    clicked => { variation-toggled(!variation); }
                 }
             }
         }
     }
 }
 
-/// Bottom dock: the pedal's face on the left (enclosure colour, silkscreen, type window,
-/// colour-memory LEDs, footswitch), its parameters on a wide grid to the right.
 export component Inspector inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <color> hue;
+    in property <int> kind;
     in property <color> ink;
     in property <bool> has-sw;
     in property <bool> on;
@@ -206,245 +304,333 @@ export component Inspector inherits Rectangle {
     in property <int> section;
     in property <[ParamRow]> params;
     in property <float> params-h;
-    in property <int> cols: 6;
-    callback close();
+    in property <int> cols: 8;
+    // amp block: type band on the Amp tab
+    in property <bool> is-amp;
+    in property <int> amp-family: -1;
+    in property <bool> amp-var;
+    in property <int> dsp-voicing: -1;
+    // band above the knobs: 1 EQ response, 2 delay tempo sync
+    in property <int> extra;
+    in property <string> eq-curve;
+    in property <string> eq-fill;
+    in property <int> delay-ms;
+    in property <int> bpm: 100;
+    callback delay-sync(int);
+    callback tap();
     callback toggle(bool);
     callback variant-picked(int);
     callback type-request();
     callback section-picked(int);
     callback param(int, int);
     callback enum-request(int);
+    callback family-picked(int);
+    callback variation-toggled(bool);
+    callback dsp-voicing-picked(int);
 
     property <color> accent: hue.brighter(0.35);
-    property <length> face-w: 260px;
-    property <length> cw: (self.width - face-w - 48px) / cols;
+    property <length> head-h: 68px;
+    property <length> pad: 24px;
+    property <length> cw: (self.width - 2 * pad) / cols;
+    property <bool> band: is-amp && section == 0;
+    property <length> band-h: band ? 96px : extra == 1 ? 168px : extra == 2 ? 74px : 0px;
 
-    border-radius: 6px;
+    border-radius: T.r-card;
     background: T.bg;
-    border-width: 1px;
-    border-color: T.line;
     clip: true;
     TouchArea { }
 
-    // ------------------------------------------------ module header
-    face := Rectangle {
+    // ------------------------------------------------ header row
+    HorizontalLayout {
         x: 0;
         y: 0;
-        width: face-w;
-        height: parent.height;
-        background: T.panel;
-        // category stripe
-        Rectangle { x: 0; width: 3px; background: root.hue; }
-        Rectangle { x: parent.width - 1px; width: 1px; background: T.line; }
-
+        width: parent.width;
+        height: head-h;
+        padding-left: pad;
+        padding-right: pad;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 10px;
+                background: (has-sw && !on ? T.text-3 : root.accent).with-alpha(0.16);
+                Path {
+                    width: 20px;
+                    height: 20px;
+                    commands: Glyphs.path(root.kind);
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    stroke: has-sw && !on ? T.text-3 : root.accent;
+                    stroke-width: 1.8px;
+                    fill: transparent;
+                }
+            }
+        }
         Text {
-            x: 22px;
-            y: 18px;
-            width: parent.width - 44px;
             text: root.title;
             color: T.text;
-            font-family: T.mono;
+            font-size: 18px;
             font-weight: 700;
-            font-size: 20px;
-            letter-spacing: 1.5px;
-            overflow: elide;
+            vertical-alignment: center;
         }
-        HorizontalLayout {
-            x: 22px;
-            y: 50px;
-            height: 14px;
-            spacing: 6px;
-            VerticalLayout { alignment: center; Led { size: 7px; state: !has-sw || on ? 1 : 0; } }
-            Text {
-                text: !has-sw ? "ALWAYS ON" : on ? "ACTIVE" : "BYPASS";
-                color: T.text-3;
-                font-family: T.mono;
-                font-size: 10px;
-                letter-spacing: 1px;
-                vertical-alignment: center;
-            }
-        }
-
-        // type selector
-        if has-types: Rectangle {
-            x: 22px;
-            y: 80px;
-            width: parent.width - 44px;
-            height: 36px;
-            border-radius: T.r;
-            background: tya.has-hover ? T.hover : T.well;
-            border-width: 1px;
-            border-color: tya.has-hover ? T.line-hi : T.line;
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 10px;
-                spacing: 8px;
-                Text {
-                    text: root.subtitle;
-                    color: T.text;
-                    font-size: 13px;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Icon { d: Icons.chevron-down; size: 16px; tint: T.text-3; }
-                }
-            }
-            tya := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { type-request(); }
-            }
-        }
-
-        // colour memory: the three LED colours the amp panel can recall
-        if variant >= 0: HorizontalLayout {
-            x: 22px;
-            y: has-types ? 128px : 80px;
-            width: parent.width - 44px;
-            height: 30px;
-            spacing: 4px;
-            for c[i] in ["GRN", "RED", "YEL"]: Rectangle {
-                horizontal-stretch: 1;
+        // type / model picker
+        if has-types: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 220px;
+                height: 34px;
                 border-radius: T.r;
-                background: i == variant ? T.panel-hi : vca.has-hover ? T.hover : transparent;
-                border-width: 1px;
-                border-color: i == variant ? T.line-hi : T.line;
+                background: tya.has-hover ? T.hover : T.panel-hi;
                 HorizontalLayout {
-                    alignment: center;
-                    spacing: 6px;
-                    VerticalLayout { alignment: center; Led { size: 7px; state: i == variant || vca.has-hover ? i + 1 : 0; } }
-                    Text {
-                        text: c;
-                        color: i == variant ? T.text : T.text-3;
-                        font-family: T.mono;
-                        font-size: 10px;
-                        letter-spacing: 1px;
+                    padding-left: 12px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    if is-amp: Text {
+                        text: "Model";
+                        color: T.text-3;
+                        font-size: 12px;
                         vertical-alignment: center;
                     }
-                }
-                vca := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { variant-picked(i); }
-                }
-            }
-        }
-
-        // bypass switch
-        if has-sw: Rectangle {
-            x: 22px;
-            y: parent.height - 58px;
-            width: parent.width - 44px;
-            height: 36px;
-            border-radius: T.r;
-            background: fsa.pressed ? T.well : on ? T.accent.with-alpha(0.12) : fsa.has-hover ? T.hover : T.panel-hi;
-            border-width: 1px;
-            border-color: on ? T.accent-lo : T.line-hi;
-            HorizontalLayout {
-                alignment: center;
-                spacing: 8px;
-                VerticalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 4px;
-                        background: on ? T.accent : #2A2D35;
+                    Text {
+                        text: root.subtitle;
+                        color: T.text;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Icon { d: Icons.chevron-down; size: 16px; tint: T.text-2; }
                     }
                 }
-                Text {
-                    text: on ? "ON" : "BYPASS";
-                    color: on ? T.accent-hi : T.text-2;
-                    font-family: T.mono;
-                    font-weight: 600;
-                    font-size: 11px;
-                    letter-spacing: 1.5px;
-                    vertical-alignment: center;
+                tya := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { type-request(); }
                 }
-            }
-            fsa := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { toggle(!on); }
             }
         }
-    }
-
-    // ------------------------------------------------ section tabs
-    tabs := Rectangle {
-        x: face-w;
-        y: 0;
-        width: parent.width - face-w;
-        height: 46px;
-        if sections.length > 1: HorizontalLayout {
-            padding-left: 24px;
-            padding-right: 60px;
-            spacing: 22px;
-            alignment: start;
-            for sct[i] in sections: Rectangle {
-                width: stt.preferred-width;
-                stt := Text {
+        // colour memory: the three panel colours the amp can recall for this block
+        if variant >= 0: VerticalLayout {
+            alignment: center;
+            SegGroup {
+                width: 3 * 34px + 10px;
+                for c[i] in ["Green", "Red", "Yellow"]: Rectangle {
+                    width: 34px;
+                    border-radius: 6px;
+                    background: i == variant ? T.panel-hi : vca.has-hover ? T.hover : transparent;
+                    Rectangle {
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: i == variant || vca.has-hover ? T.led(i + 1) : T.led(i + 1).with-alpha(0.35);
+                    }
+                    vca := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { variant-picked(i); }
+                    }
+                    if vca.has-hover: Tip {
+                        x: (parent.width - self.width) / 2;
+                        y: parent.height + 6px;
+                        text: c + " memory";
+                    }
+                }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        // section tabs as a segmented control
+        if sections.length > 1: VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            SegGroup {
+                for sct[i] in sections: SegBtn {
+                    stretch: false;
                     text: sct;
-                    color: i == section ? T.text : sta.has-hover ? T.text-2 : T.text-3;
-                    font-family: T.mono;
-                    font-size: 11px;
-                    letter-spacing: 1px;
-                    font-weight: i == section ? 600 : 400;
-                }
-                Rectangle {
-                    y: parent.height - 2px;
-                    height: 2px;
-                    background: i == section ? root.accent : transparent;
-                }
-                sta := TouchArea {
-                    mouse-cursor: pointer;
+                    accent: T.text;
+                    active: i == section;
                     clicked => { section-picked(i); }
                 }
             }
         }
-        Rectangle {
-            y: parent.height - 1px;
-            height: 1px;
-            background: T.line;
+        // power
+        if has-sw: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 10px;
+            Text {
+                text: on ? "On" : "Bypassed";
+                color: on ? T.text : T.text-2;
+                font-size: 12.5px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                Toggle {
+                    width: 48px;
+                    height: 26px;
+                    on: root.on;
+                    toggled(v) => { toggle(v); }
+                }
+            }
+        }
+        if !has-sw: HorizontalLayout {
+            horizontal-stretch: 0;
+            spacing: 8px;
+            VerticalLayout { alignment: center; Led { size: 7px; state: 1; } }
+            Text {
+                text: "Always on";
+                color: T.text-2;
+                font-size: 12.5px;
+                vertical-alignment: center;
+            }
         }
     }
-
-    // close
     Rectangle {
-        x: parent.width - 44px;
-        y: 7px;
-        width: 32px;
-        height: 32px;
-        border-radius: 16px;
-        background: xa.has-hover ? T.hover : transparent;
-        Icon { d: Icons.close; size: 18px; tint: xa.has-hover ? T.text : T.text-3; }
-        xa := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { close(); }
-        }
+        x: pad;
+        y: head-h - 1px;
+        width: parent.width - 2 * pad;
+        height: 1px;
+        background: T.line;
     }
 
-    // ------------------------------------------------ parameter grid
+    // ------------------------------------------------ parameters
     Flickable {
-        x: face-w;
-        y: 46px;
-        width: parent.width - face-w;
-        height: parent.height - 46px;
-        content-height: params-h * 1px + 40px;
+        x: 0;
+        y: head-h;
+        width: parent.width;
+        height: parent.height - head-h;
+        content-height: band-h + params-h * 1px + 48px;
+        if band: AmpTypeBand {
+            x: pad;
+            y: 20px;
+            width: parent.width - 2 * pad;
+            height: 66px;
+            family: amp-family;
+            variation: amp-var;
+            dsp-voicing: dsp-voicing;
+            accent: root.accent;
+            family-picked(f) => { root.family-picked(f); }
+            variation-toggled(v) => { root.variation-toggled(v); }
+            dsp-voicing-picked(v) => { root.dsp-voicing-picked(v); }
+        }
+        if extra == 1: Rectangle {
+            x: pad;
+            y: 20px;
+            width: parent.width - 2 * pad;
+            height: 136px;
+            border-radius: 10px;
+            background: T.panel;
+            clip: true;
+            // octave grid (100 Hz, 1 kHz, 10 kHz) and the 0 dB line
+            for gx in [0.233, 0.566, 0.9]: Rectangle {
+                x: parent.width * gx;
+                width: 1px;
+                height: parent.height;
+                background: T.line;
+            }
+            Rectangle {
+                y: parent.height / 2;
+                width: parent.width;
+                height: 1px;
+                background: T.line-hi;
+            }
+            Path {
+                width: parent.width;
+                height: parent.height;
+                viewbox-width: 1000;
+                viewbox-height: 200;
+                fit: fill;
+                commands: root.eq-fill;
+                fill: root.accent.with-alpha(0.14);
+            }
+            Path {
+                width: parent.width;
+                height: parent.height;
+                viewbox-width: 1000;
+                viewbox-height: 200;
+                fit: fill;
+                commands: root.eq-curve;
+                stroke: root.accent;
+                stroke-width: 2px;
+                fill: transparent;
+            }
+            for l in [{ x: 0.0, t: "20 Hz" }, { x: 0.233, t: "100" }, { x: 0.566, t: "1k" }, { x: 0.9, t: "10k" }]: Text {
+                x: parent.width * l.x + 6px;
+                y: parent.height - 18px;
+                text: l.t;
+                color: T.text-3;
+                font-size: 10.5px;
+            }
+            Text { x: 8px; y: 6px; text: "+24 dB"; color: T.text-3; font-size: 10.5px; }
+            Text { x: 8px; y: parent.height / 2 - 16px; text: "0"; color: T.text-3; font-size: 10.5px; }
+        }
+        if extra == 2: HorizontalLayout {
+            x: pad;
+            y: 20px;
+            width: parent.width - 2 * pad;
+            height: 40px;
+            spacing: 10px;
+            Text {
+                text: "Sync to tempo";
+                color: T.text-2;
+                font-size: 12.5px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Text {
+                text: bpm + " BPM";
+                color: T.text;
+                font-family: T.mono;
+                font-size: 13px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: tt.preferred-width + 22px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: tpa.pressed ? root.accent.with-alpha(0.3) : tpa.has-hover ? T.hover : T.panel-hi;
+                    tt := Text { text: "Tap"; color: T.text; font-size: 12px; font-weight: 600; }
+                    tpa := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.tap(); }
+                    }
+                }
+            }
+            Rectangle { width: 6px; }
+            SegGroup {
+                for n in [{ t: "1/4", f: 1.0 }, { t: "1/8.", f: 0.75 }, { t: "1/4T", f: 0.6667 }, { t: "1/8", f: 0.5 }, { t: "1/8T", f: 0.3333 }, { t: "1/16", f: 0.25 }]: SegBtn {
+                    stretch: false;
+                    text: n.t;
+                    accent: T.text;
+                    active: abs(round(60000 / Math.max(bpm, 1) * n.f) - delay-ms) <= 1;
+                    clicked => { root.delay-sync(round(60000 / Math.max(bpm, 1) * n.f)); }
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: delay-ms + " ms";
+                color: T.text-3;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+        }
         for p[i] in params: Rectangle {
-            x: 24px + p.col * root.cw;
-            y: 20px + p.py * 1px;
+            x: pad + p.col * root.cw;
+            y: 24px + band-h + p.py * 1px;
             width: p.span * root.cw;
-            height: 112px;
+            height: 92px;
             if p.show-group: Text {
                 x: 4px;
-                y: -26px;
+                y: -28px;
                 text: p.group;
-                color: T.text-3;
-                font-family: T.mono;
-                font-size: 10px;
-                letter-spacing: 1px;
+                color: T.text-2;
+                font-size: 12px;
                 font-weight: 600;
             }
             if !p.is-enum && !p.is-switch: BigKnob {

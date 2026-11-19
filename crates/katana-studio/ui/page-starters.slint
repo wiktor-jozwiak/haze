@@ -1,0 +1,34 @@
+import { T } from "theme.slint";
+import { TemplateRow, StarterGrid } from "library.slint";
+
+/// Starter rigs page: ready-made chains as cards.
+export component StartersPage inherits VerticalLayout {
+    in property <[TemplateRow]> templates;
+    callback used(int);
+
+    padding-top: 6px;
+    spacing: 16px;
+    HorizontalLayout {
+        height: 44px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            Text {
+                text: "Starter rigs";
+                color: T.text;
+                font-size: 20px;
+                font-weight: 700;
+            }
+            Text {
+                text: "Ready-made chains: amp, effects and order. Add one to your library, then make it yours.";
+                color: T.text-2;
+                font-size: 12.5px;
+            }
+        }
+    }
+    StarterGrid {
+        vertical-stretch: 1;
+        templates: templates;
+        used(i) => { root.used(i); }
+    }
+}

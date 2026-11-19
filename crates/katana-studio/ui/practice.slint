@@ -1,0 +1,341 @@
+// Practice Suite: bottom drawer with the phrase looper, groove drums / metronome with tap
+// tempo, and .wav loaders for cabinet IRs and DI loops. Runs on the PC DSP engine only.
+import { T } from "theme.slint";
+
+component Key inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <color> lit: T.accent;
+    in property <bool> enabled: true;
+    callback clicked;
+    min-width: t.preferred-width + 20px;
+    max-width: self.min-width;
+    horizontal-stretch: 0;
+    height: 30px;
+    border-radius: T.r;
+    background: active ? lit.with-alpha(0.18) : ta.pressed ? T.well : ta.has-hover && enabled ? T.hover : T.panel-hi;
+    opacity: enabled ? 1 : 0.4;
+    t := Text {
+        text: root.text;
+        color: active ? lit : T.text;
+        font-weight: 600;
+        font-size: 12px;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Caption inherits Text {
+    color: T.text-2;
+    font-size: 12px;
+    vertical-alignment: center;
+}
+
+export component PracticeDrawer inherits Rectangle {
+    in-out property <bool> open;
+    in property <bool> engine;
+    // looper: 0 empty, 1 rec, 2 play, 3 dub, 4 stopped
+    in property <int> loop-state;
+    in property <float> loop-progress;
+    in property <string> loop-time;
+    in property <bool> drum-on;
+    in property <int> drum-pattern;
+    in property <int> bpm: 100;
+    in property <int> drum-step;
+    in property <string> ir-name;
+    in property <string> di-name;
+    // chromatic tuner readout (PC engine), shown in the status bar
+    in property <bool> show-tuner;
+    in property <string> tuner-note;
+    in property <float> tuner-cents;
+    in property <bool> tuner-active;
+    callback toggled(bool);
+    callback loop-action(int);
+    callback drum-toggled(bool);
+    callback drum-pattern-picked(int);
+    callback bpm-changed(int);
+    callback tap();
+    callback load-ir(string);
+    callback load-di(string);
+
+    property <length> bar-h: 34px;
+    // fixed band in the stage column: layouts honour min/max, not a bare height
+    min-height: open ? bar-h + 78px : bar-h;
+    max-height: self.min-height;
+    vertical-stretch: 0;
+    background: T.chrome;
+
+    // ---------------------------------------------------------------- status bar
+    Rectangle {
+        y: open ? 78px : 0;
+        height: bar-h;
+        HorizontalLayout {
+            padding-top: 4px;
+            padding-bottom: 2px;
+            spacing: 12px;
+            // drawer toggle: a real button, not a caption
+            Rectangle {
+                width: 136px;
+                border-radius: 9px;
+                background: open ? T.accent.with-alpha(0.16) : hta.has-hover ? T.hover : T.panel;
+                pl := HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    Text {
+                        text: open ? "▾" : "▴";
+                        color: open ? T.accent-hi : T.text-2;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Practice Suite";
+                        color: open ? T.accent-hi : T.text;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                hta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open = !root.open;
+                        root.toggled(root.open);
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: loop-state == 1 ? T.led-red : loop-state == 3 ? T.led-yellow : loop-state == 2 ? T.led-green : #2A2D35;
+                }
+            }
+            Caption { text: "Loop " + ["empty", "rec", "play", "dub", "stopped"][loop-state] + (loop-state == 0 ? "" : " " + loop-time); }
+            Caption { text: drum-on ? "Drums " + bpm + " BPM" : "Drums off"; }
+            Rectangle { horizontal-stretch: 1; }
+            // mode requirement as a badge, not a sentence
+            if !engine: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 22px;
+                    width: bt.preferred-width + 16px;
+                    border-radius: 11px;
+                    background: T.led-yellow.with-alpha(0.10);
+                    border-width: 1px;
+                    border-color: T.led-yellow.with-alpha(0.6);
+                    bt := Text {
+                        text: T.hw ? "Requires Standalone mode" : "Audio engine stopped";
+                        color: T.led-yellow;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                }
+            }
+            if show-tuner: HorizontalLayout {
+                spacing: 6px;
+                opacity: tuner-active ? 1 : 0.6;
+                Caption { text: "Tuner"; }
+                Text {
+                    min-width: 26px;
+                    text: tuner-note;
+                    color: tuner-active && abs(tuner-cents) < 3 ? T.led-green : T.text;
+                    font-family: T.mono;
+                    font-weight: 700;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 72px;
+                    for i in 9: Rectangle {
+                        x: i * (parent.width - 2px) / 8;
+                        y: i == 4 ? (parent.height - 14px) / 2 : (parent.height - 6px) / 2;
+                        width: 2px;
+                        height: i == 4 ? 14px : 6px;
+                        background: i == 4 ? T.text-3 : T.line-hi;
+                    }
+                    if tuner-active: Rectangle {
+                        x: (parent.width - 4px) * (clamp(tuner-cents, -50, 50) + 50) / 100;
+                        y: (parent.height - 14px) / 2;
+                        width: 4px;
+                        height: 14px;
+                        border-radius: 1px;
+                        background: abs(tuner-cents) < 3 ? T.led-green : T.accent;
+                    }
+                }
+            }
+            // keyboard hint as a key cap
+            if !T.hw: HorizontalLayout {
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: kt.preferred-width + 12px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: T.panel-hi;
+                        border-width: 1px;
+                        border-color: T.line-hi;
+                        kt := Text { text: "Space"; color: T.text-2; font-family: T.mono; font-size: 10px; }
+                    }
+                }
+                Caption { text: open ? "Looper" : "Play DI"; }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- deck
+    if open: Rectangle {
+        y: 0;
+        height: 74px;
+        border-radius: T.r-card;
+        background: T.bg;
+        opacity: engine ? 1 : 0.45;
+        HorizontalLayout {
+            padding: 12px;
+            padding-left: 14px;
+            spacing: 14px;
+
+            // -------- looper
+            VerticalLayout {
+                horizontal-stretch: 0;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 4px;
+                    Key {
+                        text: loop-state == 0 ? "● REC" : loop-state == 1 ? "▶ PLAY" : loop-state == 3 ? "▶ PLAY" : "● DUB";
+                        lit: loop-state == 1 ? T.led-red : T.led-yellow;
+                        active: loop-state == 1 || loop-state == 3;
+                        enabled: engine;
+                        clicked => { loop-action(0); }
+                    }
+                    Key { text: "■ STOP"; enabled: engine && loop-state != 0; clicked => { loop-action(1); } }
+                    Key { text: "↶ UNDO"; enabled: engine && loop-state >= 2; clicked => { loop-action(3); } }
+                    Key { text: "✕ CLEAR"; enabled: engine && loop-state != 0; clicked => { loop-action(4); } }
+                }
+                Rectangle {
+                    height: 6px;
+                    border-radius: 1px;
+                    background: T.well;
+                    border-width: 1px;
+                    border-color: T.line;
+                    Rectangle {
+                        x: 1px;
+                        y: 1px;
+                        height: 4px;
+                        width: (parent.width - 2px) * clamp(loop-progress, 0, 1);
+                        background: loop-state == 1 ? T.led-red : loop-state == 3 ? T.led-yellow : T.accent;
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: T.line; }
+
+            // -------- drums
+            VerticalLayout {
+                horizontal-stretch: 0;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 4px;
+                    Key {
+                        text: drum-on ? "■ DRUMS" : "▶ DRUMS";
+                        active: drum-on;
+                        enabled: engine;
+                        clicked => { drum-toggled(!drum-on); }
+                    }
+                    for p[i] in ["METRO", "ROCK", "FUNK", "SHUFFLE", "METAL"]: Key {
+                        text: p;
+                        active: i == drum-pattern;
+                        enabled: engine;
+                        clicked => { drum-pattern-picked(i); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 3px;
+                    for s in 16: Rectangle {
+                        width: 12px;
+                        height: 6px;
+                        border-radius: 1px;
+                        background: drum-on && s == drum-step ? T.accent : mod(s, 4) == 0 ? T.line-hi : T.line;
+                    }
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 0;
+                spacing: 4px;
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 4px;
+                    Key { text: "−"; enabled: engine; clicked => { bpm-changed(bpm - 1); } }
+                    Rectangle {
+                        width: 64px;
+                        border-radius: T.r;
+                        background: T.well;
+                        border-width: 1px;
+                        border-color: T.line;
+                        Text {
+                            text: bpm;
+                            color: T.text;
+                            font-family: T.mono;
+                            font-weight: 700;
+                            font-size: 16px;
+                        }
+                        TouchArea {
+                            scroll-event(e) => {
+                                bpm-changed(bpm + (e.delta-y > 0 ? 1 : -1));
+                                accept
+                            }
+                        }
+                    }
+                    Key { text: "+"; enabled: engine; clicked => { bpm-changed(bpm + 1); } }
+                    Key { text: "TAP"; clicked => { tap(); } }
+                }
+                Caption { text: "BPM · TAP → DELAY ♩"; }
+            }
+            Rectangle { width: 1px; background: T.line; }
+
+            // -------- files
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 150px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 4px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 30px;
+                        border-radius: T.r;
+                        background: T.well;
+                        border-width: 1px;
+                        border-color: path.has-focus ? T.accent-lo : T.line;
+                        path := TextInput {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            color: T.text;
+                            font-size: 11px;
+                            single-line: true;
+                            vertical-alignment: center;
+                        }
+                        if path.text == "" && !path.has-focus: Text {
+                            x: 8px;
+                            text: ".wav path → cab IR or DI loop";
+                            color: T.text-3;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Key { text: "IR"; enabled: engine; clicked => { load-ir(path.text); } }
+                    Key { text: "DI"; enabled: engine; clicked => { load-di(path.text); } }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    Caption { text: "Cab: " + ir-name; overflow: elide; }
+                    Caption { text: "DI: " + di-name; overflow: elide; horizontal-stretch: 1; }
+                }
+            }
+        }
+    }
+}

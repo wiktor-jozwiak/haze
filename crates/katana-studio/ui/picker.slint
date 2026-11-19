@@ -1,0 +1,129 @@
+import { ListView } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { SearchField } from "widgets.slint";
+import { ToneRow, Essential, Chip, ToneItem } from "library.slint";
+import { Menu, ModeBtn, Well } from "parts.slint";
+
+/// Quick preset picker: a floating window over the rig, closed by a pick, Esc or a click outside.
+export component Picker inherits Rectangle {
+    in property <string> nav-selected;
+    in property <string> nav-title;
+    in property <[Essential]> essentials;
+    in property <[ToneRow]> tones;
+    in property <int> selected-index;
+    in-out property <string> query;
+    callback close();
+    callback search(string);
+    callback nav-clicked(string);
+    callback essential-clicked(string);
+    callback tone-clicked(int);
+
+    background: #00000090;
+    TouchArea {
+        clicked => { close(); }
+    }
+    picker := Menu {
+        x: (parent.width - self.width) / 2;
+        y: 64px;
+        width: 560px;
+        height: Math.min(parent.height - 120px, 600px);
+        border-radius: 14px;
+        background: T.panel;
+        TouchArea { }
+        FocusScope {
+            key-pressed(e) => {
+                if e.text == Key.Escape {
+                    close();
+                    return accept;
+                }
+                reject
+            }
+            VerticalLayout {
+                padding: 14px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    pf := SearchField {
+                        horizontal-stretch: 1;
+                        height: 40px;
+                        text <=> root.query;
+                        init => { self.focus-input(); }
+                        edited(q) => { search(q); }
+                    }
+                    Well {
+                        width: pk-seg.preferred-width + 6px;
+                        height: 40px;
+                        pk-seg := HorizontalLayout {
+                            x: 3px;
+                            y: 3px;
+                            height: 34px;
+                            spacing: 2px;
+                            ModeBtn {
+                                text: "All";
+                                led: T.accent;
+                                active: nav-selected == "all";
+                                clicked => { nav-clicked("all"); }
+                            }
+                            ModeBtn {
+                                text: "Favorites";
+                                led: T.accent;
+                                active: nav-selected == "fav";
+                                clicked => { nav-clicked("fav"); }
+                            }
+                        }
+                    }
+                }
+                // favourites + recently used, one click away
+                if essentials.length > 0: Flickable {
+                    height: 28px;
+                    content-width: ess-row.preferred-width;
+                    ess-row := HorizontalLayout {
+                        spacing: 6px;
+                        for e in essentials: Chip {
+                            text: e.name;
+                            dot: e.color;
+                            active: e.selected;
+                            clicked => {
+                                essential-clicked(e.id);
+                                close();
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    ListView {
+                        for tone[i] in tones: ToneItem {
+                            tone: tone;
+                            selected: i == selected-index;
+                            clicked => {
+                                tone-clicked(i);
+                                close();
+                            }
+                        }
+                    }
+                    if tones.length == 0: Text {
+                        text: "No presets match.";
+                        color: T.text-2;
+                    }
+                }
+                HorizontalLayout {
+                    height: 20px;
+                    Text {
+                        text: (nav-selected == "all" || nav-selected == "fav" ? nav-title : "Setlist: " + nav-title) + " · " + tones.length + (tones.length == 1 ? " preset" : " presets");
+                        color: T.text-3;
+                        font-size: 12px;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "Esc to close · Ctrl+K to open";
+                        color: T.text-3;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
