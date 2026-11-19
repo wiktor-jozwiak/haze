@@ -6,6 +6,8 @@ use crate::blocks::{Amp, Delay, Drive, Eq10, Gate, Limiter, Modulation, Reverb};
 use crate::conv::{builtin_cab, Convolver, IrSpectrum, CABS};
 use crate::filters::{db, Smooth};
 use crate::params::{Meters, Params, P};
+use crate::practice::{Drums, LoopAction, Looper};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 pub enum Cmd {
@@ -15,12 +17,18 @@ pub enum Cmd {
     SetDi(Box<Vec<f32>>),
     /// Restart the DI loop from the top.
     RewindDi,
+    /// Memory for the looper: interleaved [base L, base R, layer L, layer R] frames.
+    SetLoopBuffer(Box<[f32]>),
+    Loop(LoopAction),
+    /// Drum machine back to bar start (on start / tempo tap).
+    DrumsRestart,
 }
 
 /// Objects the audio thread hands back to be dropped elsewhere.
 pub enum Trash {
     Ir(Box<IrSpectrum>),
     Di(Box<Vec<f32>>),
+    Loop(Box<[f32]>),
 }
 
 pub struct Chain {
@@ -40,6 +48,9 @@ pub struct Chain {
     delay: Delay,
     reverb: Reverb,
     limiter: Limiter,
+    looper: Looper,
+    drums: Drums,
+    drums_were_on: bool,
     di: Box<Vec<f32>>,
     di_pos: usize,
     in_gain: Smooth,
@@ -75,6 +86,9 @@ impl Chain {
             delay: Delay::new(fs),
             reverb: Reverb::new(fs),
             limiter: Limiter::new(fs),
+            looper: Looper::new(),
+            drums: Drums::new(fs),
+            drums_were_on: false,
             di: Box::new(crate::di::builtin_riff(fs)),
             di_pos: 0,
             in_gain: Smooth::new(1.0, 20.0, fs),
@@ -103,6 +117,14 @@ impl Chain {
                     }
                 }
                 Cmd::RewindDi => self.di_pos = 0,
+                Cmd::SetLoopBuffer(b) => {
+                    let old = self.looper.set_buffer(b);
+                    if let Err(rtrb::PushError::Full(t)) = self.trash.push(Trash::Loop(old)) {
+                        std::mem::forget(t);
+                    }
+                }
+                Cmd::Loop(a) => self.looper.action(a),
+                Cmd::DrumsRestart => self.drums.reset(),
             }
         }
     }
@@ -138,6 +160,12 @@ impl Chain {
         let rev_on = p.on(P::ReverbOn);
         let (rt, rd, rm) = (p.get(P::ReverbType) as i32, p.get(P::ReverbDecay), p.get(P::ReverbMix));
         let lim_on = p.on(P::Limiter);
+        let drums_on = p.on(P::DrumOn);
+        if drums_on && !self.drums_were_on {
+            self.drums.reset();
+        }
+        self.drums_were_on = drums_on;
+        let (bpm, pat, dlev, llev) = (p.get(P::Bpm), p.get(P::DrumPattern) as usize, p.get(P::DrumLevel), p.get(P::LoopLevel));
 
         let mut in_peak = 0f32;
         let mut out_peak = 0f32;
@@ -179,6 +207,15 @@ impl Chain {
             if rev_on {
                 (l, r) = self.reverb.tick(l, r, rt, rd, rm);
             }
+            // looper records the processed guitar (not the drums), plays back alongside it
+            let (pl, pr) = self.looper.tick(l, r);
+            l += pl * llev;
+            r += pr * llev;
+            if drums_on {
+                let d = self.drums.tick(bpm, pat) * dlev;
+                l += d;
+                r += d;
+            }
             let og = self.out_gain.next(out_g);
             l *= og;
             r *= og;
@@ -189,6 +226,10 @@ impl Chain {
             out_l[i] = l.clamp(-1.0, 1.0);
             out_r[i] = r.clamp(-1.0, 1.0);
         }
+        self.meters.loop_state.store(self.looper.state as u32, Ordering::Relaxed);
+        self.meters.loop_pos.store(self.looper.pos as u32, Ordering::Relaxed);
+        self.meters.loop_len.store(self.looper.len as u32, Ordering::Relaxed);
+        self.meters.drum_step.store(self.drums.step as u32, Ordering::Relaxed);
         Meters::raise(&self.meters.in_peak, in_peak);
         Meters::raise(&self.meters.out_peak, out_peak);
         if in_peak >= 0.99 {

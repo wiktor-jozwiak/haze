@@ -12,9 +12,11 @@ pub mod di;
 pub mod engine;
 pub mod filters;
 pub mod params;
+pub mod practice;
 pub mod tuner;
 
 pub use chain::{render_offline, write_wav, Chain, Cmd};
-pub use engine::{Config, Engine, Info};
+pub use engine::{list_devices, Config, DeviceInfo, Engine, Info};
 pub use params::{Meters, Params, P};
 pub use tuner::{Pitch, Tuner};
+pub use practice::{LoopAction, LoopState};

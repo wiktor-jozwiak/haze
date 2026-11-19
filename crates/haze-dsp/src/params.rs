@@ -58,6 +58,13 @@ params! {
     Limiter = 1.0,
     // headroom: first start plays the DI loop through speakers
     OutGainDb = -6.0,
+    // practice suite
+    Bpm = 100.0,
+    DrumOn = 0.0,
+    /// 0 Metronome, 1 Rock, 2 Funk, 3 Shuffle, 4 Metal
+    DrumPattern = 0.0,
+    DrumLevel = 0.5,
+    LoopLevel = 0.8,
 }
 
 pub const COUNT: usize = P::EqBand9 as usize + 1;
@@ -103,6 +110,12 @@ pub struct Meters {
     pub xruns: AtomicU32,
     /// DSP load of the last callback, 0..1 of the buffer duration
     pub load: AtomicU32,
+    /// looper: `practice::LoopState` as u32, play position and length in frames
+    pub loop_state: AtomicU32,
+    pub loop_pos: AtomicU32,
+    pub loop_len: AtomicU32,
+    /// current 16th of the drum bar (0..15)
+    pub drum_step: AtomicU32,
 }
 
 impl Meters {

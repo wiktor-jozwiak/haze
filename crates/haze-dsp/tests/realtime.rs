@@ -2,7 +2,8 @@
 
 use haze_dsp::chain::{Chain, Cmd};
 use haze_dsp::conv::{builtin_cab, Convolver, IrSpectrum, B};
-use haze_dsp::{Meters, Params, Tuner, P};
+use haze_dsp::practice::{LoopState, Looper};
+use haze_dsp::{LoopAction, Meters, Params, Tuner, P};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
@@ -77,8 +78,24 @@ fn process_never_allocates() {
     let ir = Box::new(IrSpectrum::new(&builtin_cab(0, fs), "test"));
     h.cmds.push(Cmd::SetIr(3, ir)).ok().unwrap();
     params.set(P::CabIr, 3.0);
+    h.cmds.push(Cmd::SetLoopBuffer(vec![0f32; 4 * 48000].into_boxed_slice())).ok().unwrap();
+    params.set(P::DrumOn, 1.0);
     ARMED.with(|a| a.set(true));
     for i in 0..400 {
+        // record, overdub, undo, clear while armed
+        match i {
+            10 | 60 | 120 | 200 => {
+                let _ = h.cmds.push(Cmd::Loop(LoopAction::Cycle));
+            }
+            150 => {
+                let _ = h.cmds.push(Cmd::Loop(LoopAction::Undo));
+            }
+            300 => {
+                let _ = h.cmds.push(Cmd::Loop(LoopAction::Clear));
+            }
+            _ => {}
+        }
+        params.set(P::DrumPattern, ((i / 13) % 5) as f32);
         // walk every model / type while armed
         params.set(P::DriveModel, (i % 6) as f32);
         params.set(P::AmpVoicing, (i % 7) as f32);
@@ -159,4 +176,56 @@ fn allocation_counter_is_live() {
     drop(v);
     ARMED.with(|a| a.set(false));
     assert!(events() >= before + 2);
+}
+
+#[test]
+fn looper_record_overdub_undo() {
+    let mut lp = Looper::new();
+    let _ = lp.set_buffer(vec![0f32; 4 * 10_000].into_boxed_slice());
+    lp.action(LoopAction::Cycle); // REC
+    for _ in 0..5000 {
+        lp.tick(0.25, -0.25);
+    }
+    lp.action(LoopAction::Cycle); // PLAY
+    assert_eq!(lp.state, LoopState::Playing);
+    assert_eq!(lp.len, 5000);
+    let (l, r) = lp.tick(0.0, 0.0);
+    assert!((l - 0.25).abs() < 1e-6 && (r + 0.25).abs() < 1e-6);
+    // finish the pass, then overdub one full pass of 0.5
+    for _ in 1..5000 {
+        lp.tick(0.0, 0.0);
+    }
+    lp.action(LoopAction::Cycle); // DUB
+    for _ in 0..5000 {
+        lp.tick(0.5, 0.5);
+    }
+    lp.action(LoopAction::Cycle); // PLAY
+    let (l, _) = lp.tick(0.0, 0.0);
+    assert!((l - 0.75).abs() < 1e-3, "base + layer, got {l}");
+    lp.action(LoopAction::Undo);
+    let (l, _) = lp.tick(0.0, 0.0);
+    assert!((l - 0.25).abs() < 1e-6, "undo drops the layer, got {l}");
+    lp.action(LoopAction::Clear);
+    assert_eq!(lp.tick(0.3, 0.3), (0.0, 0.0));
+    assert_eq!(lp.state, LoopState::Empty);
+}
+
+#[test]
+fn drums_keep_tempo() {
+    // 120 BPM metronome: clicks every 0.5 s
+    let fs = 48000.0;
+    let mut d = haze_dsp::practice::Drums::new(fs);
+    let mut onsets = vec![];
+    let mut prev = 0f32;
+    for i in 0..(fs as usize * 2) {
+        let y = d.tick(120.0, 0).abs();
+        if y > 0.05 && prev <= 0.05 && onsets.last().is_none_or(|&o: &usize| i - o > 2000) {
+            onsets.push(i);
+        }
+        prev = y;
+    }
+    assert_eq!(onsets.len(), 4, "{onsets:?}");
+    for w in onsets.windows(2) {
+        assert!((w[1] - w[0]).abs_diff(24000) < 50, "{onsets:?}");
+    }
 }
