@@ -145,25 +145,24 @@ export component ModeBtn inherits Rectangle {
     in property <string> tip;
     callback clicked;
     width: row.preferred-width + 28px;
-    border-radius: 7px;
-    background: active ? T.hover : ta.has-hover ? T.panel-hi : transparent;
+    border-radius: 6px;
+    background: active ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%) : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    border-width: 1px;
+    border-color: #000000c0;
     row := HorizontalLayout {
         x: 14px;
         spacing: 8px;
         VerticalLayout {
             alignment: center;
-            Rectangle {
-                width: 7px;
-                height: 7px;
-                border-radius: 3.5px;
-                background: active ? led : #2A2D35;
-            }
+            Lamp { size: 8px; c: root.led; lit: root.active; }
         }
         Text {
             text: root.text;
-            color: active ? T.text : T.text-2;
-            font-size: 12px;
-            font-weight: 600;
+            color: active ? T.silk : ta.has-hover ? T.silk : T.silk-2;
+            font-family: T.display;
+            font-size: 13.5px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
             vertical-alignment: center;
         }
     }
@@ -213,8 +212,8 @@ export component Pick inherits Rectangle {
 /// Recessed well grouping top-bar controls.
 export component Well inherits Rectangle {
     height: 36px;
-    border-radius: 10px;
-    background: T.panel;
+    border-radius: 8px;
+    background: #00000059;
 }
 
 export component PillDivider inherits Rectangle {

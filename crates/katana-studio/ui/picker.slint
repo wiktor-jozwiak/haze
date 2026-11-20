@@ -28,8 +28,8 @@ export component Picker inherits Rectangle {
         y: 64px;
         width: 560px;
         height: Math.min(parent.height - 120px, 600px);
-        border-radius: 14px;
-        background: T.panel;
+        border-radius: 10px;
+        background: @linear-gradient(180deg, #262422 0%, #1A1918 100%);
         TouchArea { }
         FocusScope {
             key-pressed(e) => {

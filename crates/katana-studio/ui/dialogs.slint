@@ -36,7 +36,7 @@ export component SlotPicker inherits Modal {
         font-family: T.display;
         font-size: 22px;
         font-weight: 700;
-        color: T.text;
+        color: T.silk;
     }
     for sl[i] in slots: Rectangle {
         visible: i > 0;
@@ -76,7 +76,7 @@ export component ConfirmWrite inherits Modal {
             font-family: T.display;
             font-size: 24px;
             font-weight: 700;
-            color: T.text;
+            color: T.silk;
         }
         Text {
             text: "“" + slot.name + "” will be replaced by “" + root.name + "”. The channel's current content is backed up to the library first (Amp backups).";
@@ -115,7 +115,7 @@ export component ImportDialog inherits Modal {
             font-family: T.display;
             font-size: 24px;
             font-weight: 700;
-            color: T.text;
+            color: T.silk;
         }
         Text {
             text: root.hint;
@@ -170,7 +170,7 @@ export component AddToSetlist inherits Modal {
             font-family: T.display;
             font-size: 18px;
             font-weight: 700;
-            color: T.text;
+            color: T.silk;
             overflow: elide;
         }
         ListView {
@@ -213,7 +213,7 @@ export component TagsDialog inherits Modal {
             font-family: T.display;
             font-size: 20px;
             font-weight: 700;
-            color: T.text;
+            color: T.silk;
             overflow: elide;
         }
         Text {
@@ -259,14 +259,15 @@ component KeyCap inherits Rectangle {
     height: 24px;
     width: Math.max(24px, kt.preferred-width + 14px);
     border-radius: 5px;
-    background: T.panel-hi;
+    background: @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
     border-width: 1px;
-    border-color: T.line-hi;
+    border-color: #000000c0;
     drop-shadow-offset-y: 2px;
     drop-shadow-color: #00000080;
+    Rectangle { x: 4px; y: 1px; width: parent.width - 8px; height: 1px; background: #ffffff1c; }
     kt := Text {
         text: root.text;
-        color: T.text;
+        color: T.silk;
         font-family: T.mono;
         font-size: 11.5px;
         font-weight: 700;
@@ -296,7 +297,7 @@ export component KeysDialog inherits Modal {
                     font-family: T.display;
                     font-size: 22px;
                     font-weight: 700;
-                    color: T.text;
+                    color: T.silk;
                 }
                 KeyCap { text: "Esc"; }
             }
