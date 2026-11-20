@@ -1,0 +1,553 @@
+// Hardware parts for the "boutique amp" surfaces: brushed faceplate, tolex, screws, pilot
+// lamps, bat-lever toggle, VU meters, panel keys. Textures are small seamless PNG tiles
+// (ui/tex, generated procedurally); everything else is flat shapes and gradients, so the
+// software renderer only repaints what changes (a VU needle repaints its own 70x32 face).
+import { T } from "theme.slint";
+import { Icon, Tip } from "widgets.slint";
+
+/// Brushed gunmetal plate with a bevel: light top edge, dark bottom edge.
+export component Faceplate inherits Rectangle {
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("tex/brushed.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+    }
+    // light falls from above
+    Rectangle { background: @linear-gradient(180deg, #ffffff10 0%, #ffffff00 45%, #00000030 100%); }
+    Rectangle { y: 0; height: 1px; background: #ffffff1c; }
+    Rectangle { y: parent.height - 1px; height: 1px; background: #000000; }
+    @children
+}
+
+/// Black tolex covering (amp cabinet vinyl).
+export component Tolex inherits Rectangle {
+    clip: true;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("tex/tolex.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+    }
+    @children
+}
+
+/// Pedalboard carpet (loop side of the velcro).
+export component Felt inherits Rectangle {
+    clip: true;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("tex/felt.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+    }
+    @children
+}
+
+/// Chrome Phillips screw head.
+export component PanelScrew inherits Rectangle {
+    in property <length> size: 10px;
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: @radial-gradient(circle, #E6E8EC 0%, #9A9EA6 55%, #565A61 100%);
+    border-width: 1px;
+    border-color: #00000099;
+    Path {
+        width: root.size;
+        height: root.size;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        stroke: #3B3E44;
+        stroke-width: 1.3px;
+        commands: "M3 3 L7 7 M7 3 L3 7";
+    }
+}
+
+/// Engraved vertical groove between panel sections.
+export component Groove inherits Rectangle {
+    width: 2px;
+    Rectangle { x: 0; width: 1px; background: #00000099; }
+    Rectangle { x: 1px; width: 1px; background: #ffffff12; }
+}
+
+/// Pilot lamp: chrome bezel, faceted jewel, glow when lit.
+export component Lamp inherits Rectangle {
+    in property <color> c: T.accent;
+    in property <bool> lit;
+    in property <length> size: 12px;
+    width: size;
+    height: size;
+    if lit: Rectangle {
+        width: root.size * 2.6;
+        height: root.size * 2.6;
+        border-radius: self.width / 2;
+        background: @radial-gradient(circle, root.c.with-alpha(0.38) 0%, root.c.with-alpha(0) 70%);
+    }
+    Rectangle {
+        border-radius: root.size / 2;
+        background: @linear-gradient(160deg, #E4E6EA 0%, #6C7078 100%);
+    }
+    Rectangle {
+        width: root.size - 3px;
+        height: root.size - 3px;
+        border-radius: self.width / 2;
+        background: lit
+            ? @radial-gradient(circle, root.c.brighter(0.6) 0%, root.c 45%, root.c.darker(0.45) 100%)
+            : @radial-gradient(circle, root.c.darker(0.55) 0%, root.c.darker(0.82) 100%);
+        Rectangle {
+            x: parent.width * 0.2;
+            y: parent.height * 0.16;
+            width: parent.width * 0.32;
+            height: self.width;
+            border-radius: self.width / 2;
+            background: lit ? #ffffffc0 : #ffffff22;
+        }
+    }
+}
+
+/// Two-position bat-lever toggle with silk-screened positions. `right` = lever thrown right.
+export component BatToggle inherits Rectangle {
+    in property <bool> right;
+    in property <string> left-text;
+    in property <string> right-text;
+    in property <string> left-tip;
+    in property <string> right-tip;
+    in property <color> left-c: T.accent;
+    in property <color> right-c: T.accent;
+    callback picked(bool);
+    width: 120px;
+    height: 44px;
+    // labels
+    Text {
+        x: 0;
+        y: 13px;
+        width: 34px;
+        text: root.left-text;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        color: !right ? root.left-c : lta.has-hover ? T.silk : T.silk-2;
+        font-family: T.display;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+    Text {
+        x: parent.width - 34px;
+        y: 13px;
+        width: 34px;
+        text: root.right-text;
+        horizontal-alignment: TextHorizontalAlignment.left;
+        color: right ? root.right-c : rta.has-hover ? T.silk : T.silk-2;
+        font-family: T.display;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+    // mounting washer + hex nut
+    Rectangle {
+        x: 49px;
+        y: 11px;
+        width: 22px;
+        height: 22px;
+        border-radius: 11px;
+        background: #0A0A0A;
+        border-width: 1px;
+        border-color: #ffffff14;
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: @radial-gradient(circle, #F0F1F3 0%, #A3A7AE 60%, #5E6269 100%);
+        }
+    }
+    // lever: shadow, shaft, ball tip
+    Path {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 120;
+        viewbox-height: 44;
+        fill: #00000070;
+        commands: root.right
+            ? "M60 22 L75 23.5 A4.5 4.5 0 1 1 75 31.5 L60 27 Z"
+            : "M60 22 L45 23.5 A4.5 4.5 0 1 0 45 31.5 L60 27 Z";
+    }
+    Path {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 120;
+        viewbox-height: 44;
+        fill: @linear-gradient(180deg, #FAFBFC 0%, #B9BDC4 50%, #6A6E76 100%);
+        stroke: #2A2C30;
+        stroke-width: 0.8px;
+        commands: root.right
+            ? "M60 19.6 L75 20.6 A4.2 4.2 0 1 1 75 27.4 L60 24.4 Z"
+            : "M60 19.6 L45 20.6 A4.2 4.2 0 1 0 45 27.4 L60 24.4 Z";
+    }
+    lta := TouchArea {
+        x: 0;
+        width: parent.width / 2;
+        mouse-cursor: pointer;
+        clicked => { root.picked(false); }
+    }
+    rta := TouchArea {
+        x: parent.width / 2;
+        width: parent.width / 2;
+        mouse-cursor: pointer;
+        clicked => { root.picked(true); }
+    }
+    if lta.has-hover && left-tip != "": Tip {
+        x: 0;
+        y: parent.height + 8px;
+        text: root.left-tip;
+    }
+    if rta.has-hover && right-tip != "": Tip {
+        x: 0;
+        y: parent.height + 8px;
+        text: root.right-tip;
+    }
+}
+
+/// Moving-needle VU meter: cream face, black scale, red zone over the top quarter, peak lamp.
+export component VuMeter inherits Rectangle {
+    in property <string> label;
+    in property <float> level; // 0..1 peak
+    in property <bool> clipped;
+    property <angle> a: (-48 + 96 * clamp(level, 0, 1)) * 1deg;
+    width: 78px;
+    height: 44px;
+    border-radius: 5px;
+    background: #0A0909;
+    border-width: 1px;
+    border-color: #3A3733;
+    face := Rectangle {
+        x: 4px;
+        y: 4px;
+        width: 70px;
+        height: 32px;
+        border-radius: 2px;
+        clip: true;
+        background: @linear-gradient(180deg, #F3EBD6 0%, #DCCDAA 100%);
+        // scale
+        Path {
+            width: 70px;
+            height: 32px;
+            viewbox-width: 70;
+            viewbox-height: 32;
+            stroke: #2B2620;
+            stroke-width: 0.9px;
+            commands: "M16.4 14.3 A25 25 0 0 1 53.6 14.3 M19.8 17.3 L16.4 14.3 M21.3 13.8 L19.5 11.4 M24.4 11.7 L23.0 9.1 M27.8 10.2 L26.8 7.4 M31.3 9.3 L30.8 6.4 M35.0 10.5 L35.0 6.0 M38.7 9.3 L39.2 6.4 M42.2 10.2 L43.2 7.4 M45.6 11.7 L47.0 9.1 M48.7 13.8 L50.5 11.4 M50.2 17.3 L53.6 14.3";
+        }
+        Path {
+            width: 70px;
+            height: 32px;
+            viewbox-width: 70;
+            viewbox-height: 32;
+            stroke: #C8372D;
+            stroke-width: 2.4px;
+            commands: "M45.4 7.7 A25.5 25.5 0 0 1 54.0 13.9";
+        }
+        Text {
+            x: 4px;
+            y: 20px;
+            text: root.label;
+            color: #2B2620;
+            font-family: T.display;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        // needle
+        Path {
+            width: 70px;
+            height: 32px;
+            viewbox-width: 70;
+            viewbox-height: 32;
+            stroke: #1A1715;
+            stroke-width: 1.1px;
+            MoveTo { x: 35; y: 31; }
+            LineTo { x: 35 + 27 * Math.sin(root.a); y: 31 - 27 * Math.cos(root.a); }
+        }
+        // pivot cover
+        Rectangle {
+            x: 27px;
+            y: 27px;
+            width: 16px;
+            height: 10px;
+            border-radius: 3px;
+            background: #1E1C1A;
+        }
+        // glass sheen
+        Rectangle { background: @linear-gradient(170deg, #ffffff40 0%, #ffffff00 40%); }
+    }
+    Rectangle {
+        x: parent.width - 9px;
+        y: parent.height - 7px;
+        width: 5px;
+        height: 4px;
+        border-radius: 1px;
+        background: clipped ? T.led-red : #3A1513;
+    }
+}
+
+/// Amp-panel key: pilot lamp + silk-screened caps; lit and raised when active.
+export component PanelKey inherits Rectangle {
+    in property <string> text;
+    in property <string> badge;
+    in property <bool> active;
+    callback clicked;
+    width: row.preferred-width + 26px;
+    height: 38px;
+    border-radius: 6px;
+    background: active ? #0000004d : ta.has-hover ? #ffffff0a : transparent;
+    border-width: active ? 1px : 0;
+    border-color: #00000080;
+    // pressed-in key: inner top shadow
+    if active: Rectangle { y: 1px; x: 1px; width: parent.width - 2px; height: 2px; border-radius: 1px; background: #00000066; }
+    if active: Rectangle { y: parent.height - 1px; x: 4px; width: parent.width - 8px; height: 1px; background: #ffffff14; }
+    row := HorizontalLayout {
+        x: 13px;
+        width: parent.width - 26px;
+        alignment: start;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Lamp { size: 8px; lit: root.active; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.active ? T.silk : ta.has-hover ? T.silk : T.silk-2;
+            font-family: T.display;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+        }
+        if root.badge != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: bt.preferred-width + 10px;
+                height: 17px;
+                border-radius: 3px;
+                background: #0A0909;
+                border-width: 1px;
+                border-color: #ffffff10;
+                bt := Text {
+                    text: root.badge;
+                    color: root.active ? T.accent : T.silk-2;
+                    font-family: T.mono;
+                    font-size: 10.5px;
+                    font-weight: 700;
+                }
+            }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Round rubber key with an icon (help, settings).
+export component RoundKey inherits Rectangle {
+    in property <string> icon;
+    in property <string> tip;
+    callback clicked;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: ta.pressed
+        ? @linear-gradient(180deg, #151413 0%, #22201F 100%)
+        : @linear-gradient(180deg, #34312E 0%, #1A1918 100%);
+    border-width: 1px;
+    border-color: #000000b0;
+    drop-shadow-blur: 3px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: #00000080;
+    Rectangle { x: 6px; y: 1px; width: parent.width - 12px; height: 1px; background: #ffffff1a; }
+    Icon {
+        d: root.icon;
+        size: 18px;
+        tint: ta.has-hover ? T.silk : T.silk-2;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if ta.has-hover && tip != "": Tip {
+        x: parent.width - self.width;
+        y: parent.height + 8px;
+        text: root.tip;
+    }
+}
+
+/// Recessed display window in a faceplate (device / engine status).
+export component Inset inherits Rectangle {
+    height: 38px;
+    border-radius: 6px;
+    background: @linear-gradient(180deg, #070707 0%, #0F0E0D 100%);
+    border-width: 1px;
+    border-color: #00000099;
+    Rectangle { y: parent.height - 1px; x: 6px; width: parent.width - 12px; height: 1px; background: #ffffff14; }
+    @children
+}
+
+/// Chrome-rimmed brand plate.
+export component BrandPlate inherits Rectangle {
+    width: 108px;
+    height: 38px;
+    border-radius: 7px;
+    background: @linear-gradient(180deg, #E9EBEE 0%, #8D9199 50%, #5B5F66 100%);
+    drop-shadow-blur: 4px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #000000a0;
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: parent.width - 4px;
+        height: parent.height - 4px;
+        border-radius: 5px;
+        background: @linear-gradient(180deg, #1B1A19 0%, #0B0B0A 100%);
+        HorizontalLayout {
+            alignment: center;
+            spacing: 7px;
+            VerticalLayout {
+                alignment: center;
+                Path {
+                    width: 18px;
+                    height: 18px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    stroke: T.accent;
+                    stroke-width: 2.4px;
+                    fill: transparent;
+                    commands: "M2 7 C6 3.5 9 10.5 12 7 C15 3.5 18 10.5 22 7 M2 13 C6 9.5 9 16.5 12 13 C15 9.5 18 16.5 22 13 M2 19 C6 15.5 9 22.5 12 19 C15 15.5 18 22.5 22 19";
+                }
+            }
+            Text {
+                text: "Haze";
+                vertical-alignment: center;
+                color: T.silk;
+                font-family: T.display;
+                font-size: 22px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }
+        }
+    }
+}
+
+/// Latching rubber key with a pilot lamp (bypass, bright, variation, tap).
+export component LatchKey inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    in property <bool> lamp: true;
+    in property <color> c: T.accent;
+    callback clicked;
+    width: row.preferred-width + 24px;
+    height: 32px;
+    border-radius: 6px;
+    background: ta.pressed || on
+        ? @linear-gradient(180deg, #141312 0%, #22201E 100%)
+        : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #33302D 0%, #1C1A19 100%);
+    border-width: 1px;
+    border-color: #000000c0;
+    drop-shadow-blur: on ? 0 : 3px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: #00000090;
+    if !on: Rectangle { x: 5px; y: 1px; width: parent.width - 10px; height: 1px; background: #ffffff1c; }
+    row := HorizontalLayout {
+        x: 12px;
+        width: parent.width - 24px;
+        alignment: center;
+        spacing: 8px;
+        if root.lamp: VerticalLayout {
+            alignment: center;
+            Lamp { size: 9px; c: root.c; lit: root.on; }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.on ? T.silk : ta.has-hover ? T.silk : T.silk-2;
+            font-family: T.display;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Silk-screened caption over a group of controls.
+export component Silk inherits Text {
+    color: T.silk-2;
+    font-family: T.display;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+/// Gig setlist: a sheet of paper taped down with gaffer tape. Dark ink, highest contrast on
+/// the screen; the current song gets a highlighter stroke (see SongRow).
+export component Paper inherits Rectangle {
+    background: #EDE6D6;
+    drop-shadow-blur: 14px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: #000000b0;
+    border-radius: 2px;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("tex/felt.png");
+        horizontal-tiling: repeat;
+        vertical-tiling: repeat;
+        opacity: 0.07;
+    }
+    // light fold across the middle
+    Rectangle {
+        y: parent.height * 0.5;
+        height: 1px;
+        background: #0000000d;
+    }
+    @children
+    // gaffer tape on the top corners
+    for c in 2: Rectangle {
+        x: c == 0 ? -10px : parent.width - self.width + 10px;
+        y: -9px;
+        width: 86px;
+        height: 24px;
+        background: #2E2E30eb;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("tex/tolex.png");
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            opacity: 0.35;
+        }
+        Rectangle { x: 0; width: 2px; background: #00000040; }
+        Rectangle { x: parent.width - 2px; width: 2px; background: #00000040; }
+    }
+}
+
+/// Matte anodised plate: cards, menus, side panels.
+export component Plate inherits Rectangle {
+    border-radius: 10px;
+    background: @linear-gradient(180deg, #232120 0%, #191817 100%);
+    border-width: 1px;
+    border-color: #000000c0;
+    drop-shadow-blur: 8px;
+    drop-shadow-offset-y: 3px;
+    drop-shadow-color: #00000090;
+    Rectangle { x: 8px; y: 0; width: parent.width - 16px; height: 1px; background: #ffffff17; }
+    @children
+}

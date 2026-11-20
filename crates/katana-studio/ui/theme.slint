@@ -1,4 +1,4 @@
-// Dark Studio Hardware: matte obsidian, anodised aluminium panels, 1px hairlines,
+// Boutique amp: black tolex, brushed gunmetal faceplates, cream silk-screen lettering, 1px hairlines,
 // one accent LED colour that follows the engine mode (amber = Katana over USB-MIDI,
 // cyan = standalone PC DSP). Flat fills only: the CPU renderer never shades per frame.
 export global T {
@@ -6,15 +6,15 @@ export global T {
     in-out property <bool> hw: true;
 
     // surfaces
-    out property <color> bg: #131519;
-    out property <color> bg-side: #0B0C0F;
-    out property <color> chrome: #0B0C0F;
-    out property <color> panel: #181B20;
-    out property <color> panel-hi: #1F2229;
-    out property <color> well: #0F1114;
-    out property <color> hover: #262A32;
-    out property <color> line: #22252C;
-    out property <color> line-hi: #30343D;
+    out property <color> bg: #131211;
+    out property <color> bg-side: #0D0C0C;
+    out property <color> chrome: #0D0C0C;
+    out property <color> panel: #1A1918;
+    out property <color> panel-hi: #22201F;
+    out property <color> well: #100F0E;
+    out property <color> hover: #2B2927;
+    out property <color> line: #282624;
+    out property <color> line-hi: #35322F;
 
     // mode LEDs
     out property <color> cyan: #00E5FF;
@@ -26,10 +26,13 @@ export global T {
 
     // text: text-2 / text-3 keep WCAG AA (>= 4.5:1) on every surface up to `hover`;
     // text-off is only for disabled controls (exempt from contrast rules)
-    out property <color> text: #E8EAF0;
-    out property <color> text-2: #A3AAB8;
-    out property <color> text-3: #858C9B;
-    out property <color> text-off: #5A606C;
+    out property <color> text: #EEEAE3;
+    out property <color> text-2: #ADA79D;
+    out property <color> text-3: #98928A;
+    out property <color> text-off: #5E5953;
+    // silk-screen print on hardware faces (amp panel, header): warm cream like real amp lettering
+    out property <color> silk: #E8DDC6;
+    out property <color> silk-2: #A89F8C;
 
     // status LEDs
     out property <color> led-green: #38E07B;

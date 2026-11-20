@@ -5,6 +5,7 @@ import { T } from "theme.slint";
 import { Icon, Icons, Tip, Glyphs } from "widgets.slint";
 import { LedImg } from "rig.slint";
 import { AmpBadge } from "art.slint";
+import { Lamp } from "gear.slint";
 
 export struct ToneRow {
     id: string,
@@ -43,13 +44,19 @@ export component Chip inherits Rectangle {
     in property <bool> active;
     in property <color> dot: transparent;
     callback clicked;
-    width: row.preferred-width + 24px;
+    width: row.preferred-width + 24px + (active ? 15px : 0);
     height: 28px;
-    border-radius: 14px;
-    background: active ? T.accent : ta.has-hover ? T.hover : T.panel;
+    border-radius: 6px;
+    background: active ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%) : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    border-width: 1px;
+    border-color: #000000c0;
     row := HorizontalLayout {
         x: 12px;
         spacing: 7px;
+        if root.active: VerticalLayout {
+            alignment: center;
+            Lamp { size: 8px; lit: true; }
+        }
         if dot != transparent: VerticalLayout {
             alignment: center;
             Rectangle {
@@ -61,9 +68,11 @@ export component Chip inherits Rectangle {
         }
         Text {
             text: root.text;
-            color: active ? T.accent-ink : T.text-2;
-            font-size: 12px;
-            font-weight: 600;
+            color: active ? T.silk : ta.has-hover ? T.silk : T.silk-2;
+            font-family: T.display;
+            font-size: 13.5px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
             vertical-alignment: center;
         }
     }
@@ -126,10 +135,14 @@ export component PresetCard inherits Rectangle {
     callback fav;
     callback add;
     height: 118px;
-    border-radius: T.r-card;
-    background: root.hov ? T.panel-hi : T.panel;
-    border-width: selected ? 2px : 0;
-    border-color: T.accent;
+    border-radius: 10px;
+    background: root.hov ? @linear-gradient(180deg, #2A2826 0%, #1D1C1A 100%) : @linear-gradient(180deg, #232120 0%, #181716 100%);
+    border-width: selected ? 2px : 1px;
+    border-color: selected ? T.accent : #000000c0;
+    drop-shadow-blur: selected ? 14px : 6px;
+    drop-shadow-offset-y: 3px;
+    drop-shadow-color: selected ? T.accent.with-alpha(0.25) : #00000090;
+    Rectangle { x: 8px; y: 1px; width: parent.width - 16px; height: 1px; background: #ffffff17; }
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -355,11 +368,12 @@ component RowAction inherits Rectangle {
     width: 30px;
     height: 30px;
     border-radius: 8px;
-    background: ta.has-hover && enabled ? (danger ? T.danger.with-alpha(0.16) : T.hover) : transparent;
+    // sits on the paper setlist: dark ink
+    background: ta.has-hover && enabled ? (danger ? #C8372D26 : #0000001a) : transparent;
     Icon {
         d: root.icon;
         size: 16px;
-        tint: !enabled ? T.text-off : ta.has-hover ? (danger ? T.danger : T.text) : T.text-2;
+        tint: !enabled ? #B8AF9E : ta.has-hover ? (danger ? #B02A20 : #191715) : #5E574B;
     }
     ta := TouchArea {
         enabled: root.enabled;
@@ -382,21 +396,24 @@ export component SongRow inherits Rectangle {
     callback moved(int);
     callback removed;
     height: 64px;
-    border-radius: 12px;
-    background: selected ? T.panel-hi : ta.has-hover ? T.panel : transparent;
+    border-radius: 4px;
+    background: ta.has-hover && !selected ? #0000000c : transparent;
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
         double-clicked => { root.opened(); }
     }
+    // highlighter stroke over the current song
     if selected: Rectangle {
-        x: 0;
-        y: 18px;
-        width: 3px;
-        height: parent.height - 36px;
-        border-radius: 1.5px;
-        background: T.accent;
+        x: 8px;
+        y: 10px;
+        width: parent.width - 16px;
+        height: parent.height - 20px;
+        border-radius: 3px;
+        background: @linear-gradient(90deg, #FFE14D99 0%, #FFE14D80 85%, #FFE14D40 100%);
     }
+    // ruled line
+    Rectangle { x: 8px; y: parent.height - 1px; width: parent.width - 16px; height: 1px; background: #4A7BB026; }
     HorizontalLayout {
         padding-left: 18px;
         padding-right: 12px;
@@ -404,7 +421,7 @@ export component SongRow inherits Rectangle {
         Text {
             width: 34px;
             text: (number < 10 ? "0" : "") + number;
-            color: selected ? T.accent-hi : T.text-3;
+            color: selected ? #2A2015 : #7A7264;
             font-family: T.mono;
             font-size: 17px;
             font-weight: 700;
@@ -417,12 +434,13 @@ export component SongRow inherits Rectangle {
             HorizontalLayout {
                 spacing: 8px;
                 Text {
-                    text: tone.name;
+                    text: tone.name.to-uppercase();
                     overflow: elide;
-                    color: T.text;
+                    color: #191715;
                     font-family: T.display;
-                    font-size: 17px;
+                    font-size: 20px;
                     font-weight: 700;
+                    letter-spacing: 0.6px;
                 }
                 if tone.live: VerticalLayout {
                     alignment: center;
@@ -452,7 +470,7 @@ export component SongRow inherits Rectangle {
             Text {
                 text: tone.fx != "" ? tone.amp + "  ·  " + tone.fx : tone.amp;
                 overflow: elide;
-                color: T.text-3;
+                color: #5E574B;
                 font-size: 12px;
             }
         }
@@ -646,7 +664,12 @@ export component StarterCard inherits Rectangle {
     callback used;
     height: 262px;
     border-radius: T.r-card;
-    background: ta.has-hover ? T.panel-hi : T.panel;
+    background: ta.has-hover ? @linear-gradient(180deg, #2A2826 0%, #1D1C1A 100%) : @linear-gradient(180deg, #232120 0%, #181716 100%);
+    border-width: 1px;
+    border-color: #000000c0;
+    drop-shadow-blur: 8px;
+    drop-shadow-offset-y: 3px;
+    drop-shadow-color: #00000090;
     clip: true;
     ta := TouchArea {
         mouse-cursor: pointer;

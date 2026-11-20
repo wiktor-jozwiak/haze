@@ -13,6 +13,8 @@ import { ToneRow, NavItem, Essential, TemplateRow, BlockChip } from "library.sli
 import { Inspector, ParamRow } from "inspector.slint";
 import { PracticeDrawer } from "practice.slint";
 import { Slot, Opt } from "types.slint";
+import { Silk } from "gear.slint";
+import { Faceplate, Tolex, Felt, PanelScrew, Groove, Lamp, BatToggle, VuMeter, PanelKey, RoundKey, Inset, BrandPlate } from "gear.slint";
 import { IconBtn, MenuItem, Menu, SlotChip, ModeBtn, Pick, Well, PillDivider, Meter, SettingsRow, PageTab } from "parts.slint";
 import { LibraryPage } from "page-library.slint";
 import { SetlistsPage } from "page-setlists.slint";
@@ -255,70 +257,46 @@ export component MainWindow inherits Window {
     property <length> drag-x;
     property <int> gap: clamp(floor((drag-x - left + ps / 2) / pitch + 0.5), 0, pedals.length);
 
+    Tolex {
+        width: parent.width;
+        height: parent.height;
+    }
     VerticalLayout {
         // ================================================= top bar: brand+mode | device | meters+actions
-        Rectangle {
-            height: 56px;
+        Faceplate {
+            height: 64px;
             z: 10; // its tooltips hang over the page below
+            PanelScrew { x: 8px; y: (parent.height - self.height) / 2; }
+            PanelScrew { x: parent.width - 18px; y: (parent.height - self.height) / 2; }
             HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 12px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 14px;
-                // -------- zone 1: wordmark + pages
+                padding-left: 28px;
+                padding-right: 28px;
+                padding-top: 13px;
+                padding-bottom: 13px;
+                spacing: 16px;
+                // -------- zone 1: brand plate + pages
+                BrandPlate { }
+                Groove { }
                 HorizontalLayout {
-                    spacing: 9px;
-                    padding-right: 10px;
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 24px;
-                            height: 24px;
-                            border-radius: 7px;
-                            background: @linear-gradient(135deg, T.accent-hi 0%, T.accent 60%, T.accent.darker(0.25) 100%);
-                            // three haze waves
-                            Path {
-                                width: 16px;
-                                height: 16px;
-                                viewbox-width: 24;
-                                viewbox-height: 24;
-                                stroke: T.accent-ink;
-                                stroke-width: 2.6px;
-                                fill: transparent;
-                                commands: "M2 7 C6 3.5 9 10.5 12 7 C15 3.5 18 10.5 22 7 M2 13 C6 9.5 9 16.5 12 13 C15 9.5 18 16.5 22 13 M2 19 C6 15.5 9 22.5 12 19 C15 15.5 18 22.5 22 19";
-                            }
-                        }
-                    }
-                    Text {
-                        text: "Haze";
-                        color: T.text;
-                        font-family: T.display;
-                        font-size: 19px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                }
-                HorizontalLayout {
-                    spacing: 2px;
-                    PageTab {
-                        text: "Rig";
+                    spacing: 4px;
+                    PanelKey {
+                        text: "RIG";
                         active: page == 0;
                         clicked => { page-picked(0); }
                     }
-                    PageTab {
-                        text: "Library";
+                    PanelKey {
+                        text: "LIBRARY";
                         badge: nav.length > 1 ? nav[1].count : "";
                         active: page == 1;
                         clicked => { page-picked(1); }
                     }
-                    PageTab {
-                        text: "Setlists";
+                    PanelKey {
+                        text: "SETLISTS";
                         active: page == 2;
                         clicked => { page-picked(2); }
                     }
-                    PageTab {
-                        text: "Starter rigs";
+                    PanelKey {
+                        text: "STARTER RIGS";
                         active: page == 3;
                         clicked => { page-picked(3); }
                     }
@@ -326,28 +304,20 @@ export component MainWindow inherits Window {
                 Rectangle { horizontal-stretch: 1; }
 
                 // -------- zone 2: engine mode + its device / connection pill
-                Well {
-                    HorizontalLayout {
-                        padding: 3px;
-                        spacing: 2px;
-                        ModeBtn {
-                            text: "Hardware";
-                            tip: "Edit the Katana over USB: every change plays on the amp";
-                            led: T.amber;
-                            active: hw-mode;
-                            clicked => { mode-picked(true); }
-                        }
-                        ModeBtn {
-                            text: "Standalone";
-                            tip: "Play through this PC: built-in amp, cab and effects, no Katana needed";
-                            led: T.cyan;
-                            active: !hw-mode;
-                            clicked => { mode-picked(false); }
-                        }
+                VerticalLayout {
+                    alignment: center;
+                    BatToggle {
+                        left-text: "AMP";
+                        right-text: "PC";
+                        left-c: T.amber;
+                        right-c: T.cyan;
+                        left-tip: "Hardware: edit the Katana over USB, every change plays on the amp";
+                        right-tip: "Standalone: play through this PC, built-in amp, cab and effects";
+                        right: !hw-mode;
+                        picked(r) => { mode-picked(!r); }
                     }
                 }
-                if hw-mode: Well {
-                    border-radius: 18px;
+                if hw-mode: Inset {
                     width: hw-row.preferred-width;
                     hw-row := HorizontalLayout {
                         padding-left: 14px;
@@ -355,13 +325,15 @@ export component MainWindow inherits Window {
                         spacing: 10px;
                         VerticalLayout {
                             alignment: center;
-                            Led { size: 8px; state: connected ? 1 : 0; }
+                            Lamp { size: 11px; c: T.led-red; lit: connected; }
                         }
                         Text {
-                            text: "Katana MkII";
-                            color: T.text;
-                            font-size: 13px;
-                            font-weight: 600;
+                            text: "KATANA MkII";
+                            color: T.silk;
+                            font-family: T.display;
+                            font-size: 14px;
+                            font-weight: 700;
+                            letter-spacing: 1px;
                             vertical-alignment: center;
                         }
                         Text {
@@ -413,8 +385,7 @@ export component MainWindow inherits Window {
                         }
                     }
                 }
-                if !hw-mode: Well {
-                    border-radius: 18px;
+                if !hw-mode: Inset {
                     width: Math.min(pc-row.preferred-width, 470px);
                     pc-row := HorizontalLayout {
                         padding-left: 14px;
@@ -422,13 +393,15 @@ export component MainWindow inherits Window {
                         spacing: 8px;
                         VerticalLayout {
                             alignment: center;
-                            Led { size: 8px; state: audio-running ? 1 : 0; }
+                            Lamp { size: 11px; c: T.cyan; lit: audio-running; }
                         }
                         Text {
-                            text: "PC DSP";
-                            color: T.text;
-                            font-size: 13px;
-                            font-weight: 600;
+                            text: "PC ENGINE";
+                            color: T.silk;
+                            font-family: T.display;
+                            font-size: 14px;
+                            font-weight: 700;
+                            letter-spacing: 1px;
                             vertical-alignment: center;
                         }
                         Text {
@@ -472,12 +445,12 @@ export component MainWindow inherits Window {
                 // -------- zone 3: meters + library / settings
                 HorizontalLayout {
                     spacing: 10px;
-                    Meter { label: "IN"; level: in-level; clipped: in-clip; }
-                    Meter { label: "OUT"; level: out-level; clipped: out-clip; }
+                    VuMeter { label: "IN"; level: in-level; clipped: in-clip; }
+                    VuMeter { label: "OUT"; level: out-level; clipped: out-clip; }
                 }
                 VerticalLayout {
                     alignment: center;
-                    IconBtn {
+                    RoundKey {
                         icon: Icons.help;
                         tip: "Keyboard shortcuts (F1)";
                         clicked => { show-keys = true; }
@@ -485,7 +458,7 @@ export component MainWindow inherits Window {
                 }
                 VerticalLayout {
                     alignment: center;
-                    IconBtn {
+                    RoundKey {
                         icon: Icons.gear;
                         tip: "Settings";
                         clicked => { settings.show(); }
@@ -494,7 +467,7 @@ export component MainWindow inherits Window {
             }
             settings := PopupWindow {
                 x: parent.width - 352px;
-                y: 48px;
+                y: 58px;
                 width: 340px;
                 height: 260px;
                 close-policy: close-on-click-outside;
@@ -574,13 +547,10 @@ export component MainWindow inherits Window {
             vertical-stretch: 1;
             // ============================================= stage: tone header + signal chain
             stage := Rectangle {
-                property <length> deck-h: 326px;
+                property <length> deck-h: 346px;
                 vertical-stretch: 0;
                 min-height: deck-h;
                 max-height: deck-h;
-                border-radius: T.r-card;
-                background: T.bg;
-                clip: true;
 
                 if !has-selection: EmptyState {
                     art: 0;
@@ -633,7 +603,7 @@ export component MainWindow inherits Window {
                                 spacing: 10px;
                                 TextInput {
                                     text: ed-name;
-                                    color: T.text;
+                                    color: T.silk;
                                     font-family: T.display;
                                     font-size: 28px;
                                     font-weight: 700;
@@ -660,16 +630,20 @@ export component MainWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     Rectangle {
-                                        width: bt.preferred-width + 34px;
+                                        width: bt.preferred-width + 36px;
                                         height: 28px;
-                                        border-radius: 14px;
-                                        background: bta.has-hover ? T.hover : T.panel-hi;
+                                        border-radius: 6px;
+                                        background: bta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+                                        border-width: 1px;
+                                        border-color: #000000b0;
                                         bt := Text {
                                             x: 12px;
-                                            text: "Browse";
-                                            color: T.text-2;
-                                            font-size: 12px;
-                                            font-weight: 600;
+                                            text: "BROWSE";
+                                            color: T.silk-2;
+                                            font-family: T.display;
+                                            font-size: 12.5px;
+                                            font-weight: 700;
+                                            letter-spacing: 1px;
                                         }
                                         Icon {
                                             x: parent.width - 22px;
@@ -742,8 +716,8 @@ export component MainWindow inherits Window {
                             Rectangle {
                                 height: 32px;
                                 width: ab.preferred-width + 6px;
-                                border-radius: 9px;
-                                background: T.well;
+                                border-radius: 8px;
+                                background: #00000066;
                                 ab := HorizontalLayout {
                                     x: 3px;
                                     y: 3px;
@@ -828,11 +802,8 @@ export component MainWindow inherits Window {
                     HorizontalLayout {
                         height: 22px;
                         spacing: 10px;
-                        Text {
-                            text: "Signal chain";
-                            color: T.text;
-                            font-weight: 600;
-                            font-size: 13px;
+                        Silk {
+                            text: "SIGNAL CHAIN";
                             vertical-alignment: center;
                         }
                         Text {
@@ -854,8 +825,39 @@ export component MainWindow inherits Window {
 
                     // ---------- signal chain
                     deck := Rectangle {
-                        height: ph + 30px;
+                        height: ph + 50px;
+                        border-radius: 10px;
                         clip: true;
+                        background: #151517;
+                        drop-shadow-blur: 10px;
+                        drop-shadow-offset-y: 4px;
+                        drop-shadow-color: #000000a0;
+                        Felt {
+                            width: parent.width;
+                            height: parent.height;
+                            // slats: the board is three aluminium rails with carpet on top
+                            for r in 2: Rectangle {
+                                y: parent.height * (r + 1) / 3 - 2px;
+                                height: 4px;
+                                background: @linear-gradient(180deg, #00000099 0%, #00000040 60%, #ffffff0d 100%);
+                            }
+                        }
+                        // frame
+                        Rectangle {
+                            border-radius: 10px;
+                            border-width: 3px;
+                            border-color: #2B2D31;
+                        }
+                        Rectangle {
+                            x: 3px;
+                            y: 3px;
+                            width: parent.width - 6px;
+                            height: parent.height - 6px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: #00000080;
+                        }
+                        Rectangle { x: 10px; y: 0; width: parent.width - 20px; height: 1px; background: #ffffff26; }
                         Flickable {
                         // scroll only when even the narrowest boxes do not fit
                         content-width: Math.max(self.width, 2 * rail-w + pedals.length * (72px + 14px));

@@ -1,5 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { T } from "theme.slint";
+import { Paper, Plate } from "gear.slint";
 import { Btn, Icons } from "widgets.slint";
 import { ToneRow, NavItem, SetRow, SongRow } from "library.slint";
 import { ToolBtn } from "parts.slint";
@@ -30,8 +31,10 @@ export component SetlistsPage inherits HorizontalLayout {
     // ---------- collections column
     Rectangle {
         width: 270px;
-        border-radius: T.r-card;
-        background: T.panel;
+        Plate {
+            width: parent.width;
+            height: parent.height;
+        }
         VerticalLayout {
             padding: 12px;
             padding-top: 16px;
@@ -41,23 +44,28 @@ export component SetlistsPage inherits HorizontalLayout {
                 padding-left: 6px;
                 Text {
                     horizontal-stretch: 1;
-                    text: "Setlists";
-                    color: T.text;
+                    text: "SETLISTS";
+                    color: T.silk;
                     font-family: T.display;
                     font-size: 19px;
                     font-weight: 700;
+                    letter-spacing: 1.4px;
                     vertical-alignment: center;
                 }
                 Rectangle {
                     width: nt.preferred-width + 24px;
                     height: 30px;
-                    border-radius: 15px;
-                    background: nta.has-hover ? T.hover : T.panel-hi;
+                    border-radius: 6px;
+                    background: nta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+                    border-width: 1px;
+                    border-color: #000000c0;
                     nt := Text {
-                        text: "+ New";
-                        color: T.text;
-                        font-size: 12px;
-                        font-weight: 600;
+                        text: "+ NEW";
+                        color: T.silk;
+                        font-family: T.display;
+                        font-size: 13px;
+                        font-weight: 700;
+                        letter-spacing: 0.8px;
                     }
                     nta := TouchArea {
                         mouse-cursor: pointer;
@@ -78,8 +86,12 @@ export component SetlistsPage inherits HorizontalLayout {
     // ---------- songs
     Rectangle {
         horizontal-stretch: 1;
-        border-radius: T.r-card;
-        background: T.bg;
+        if nav-selected != "": Paper {
+            x: 10px;
+            y: 14px;
+            width: parent.width - 20px;
+            height: parent.height - 24px;
+        }
         if nav-selected == "": EmptyState {
             art: 1;
             title: "Build your first setlist";
@@ -91,10 +103,10 @@ export component SetlistsPage inherits HorizontalLayout {
             }
         }
         if nav-selected != "": VerticalLayout {
-            padding-left: 24px;
-            padding-right: 24px;
-            padding-top: 18px;
-            padding-bottom: 12px;
+            padding-left: 40px;
+            padding-right: 40px;
+            padding-top: 40px;
+            padding-bottom: 24px;
             spacing: 14px;
             HorizontalLayout {
                 height: 52px;
@@ -106,9 +118,9 @@ export component SetlistsPage inherits HorizontalLayout {
                     // click the title to rename, Enter saves
                     TextInput {
                         text: nav-title;
-                        color: T.text;
+                        color: #191715;
                         font-family: T.display;
-                        font-size: 26px;
+                        font-size: 30px;
                         font-weight: 700;
                         single-line: true;
                         accepted => {
@@ -118,7 +130,7 @@ export component SetlistsPage inherits HorizontalLayout {
                     }
                     Text {
                         text: (tones.length == 1 ? "1 preset" : tones.length + " presets") + "  ·  click a song to play it, double-click to edit";
-                        color: T.text-3;
+                        color: #5E574B;
                         font-size: 12px;
                     }
                 }
@@ -172,6 +184,7 @@ export component SetlistsPage inherits HorizontalLayout {
                 if tones.length == 0: EmptyState {
                     art: 1;
                     compact: true;
+                    on-paper: true;
                     title: "No songs yet";
                     body: "Use + on a preset card in the Library, or load a preset on the Rig and press “Add current preset”.";
                     Btn {

@@ -2,6 +2,7 @@
 // parameters are edited. One header row (identity, type, colour memory, tabs, power), then
 // the parameters on a grid of encoders. Cell positions come precomputed from Rust (col / py).
 import { T } from "theme.slint";
+import { Faceplate, Lamp, LatchKey, Silk } from "gear.slint";
 import { Toggle, Icon, Icons, Tip, Led, Glyphs } from "widgets.slint";
 
 export struct ParamRow {
@@ -46,49 +47,84 @@ component BigKnob inherits Rectangle {
         y: 0;
         width: 64px;
         height: 64px;
-        border-radius: 32px;
-        background: root.active ? #ffffff08 : transparent;
+        // LED ring: 21 segments, bipolar params light from the centre detent
+        for d[i] in 21: Rectangle {
+            property <angle> da: (-135 + i * 13.5) * 1deg;
+            property <float> f: i / 20;
+            property <bool> lit: f >= root.lo-t - 0.026 && f <= root.hi-t + 0.026;
+            x: 32px + 29px * Math.sin(da) - 2px;
+            y: 32px - 29px * Math.cos(da) - 2px;
+            width: 4px;
+            height: 4px;
+            border-radius: 2px;
+            background: lit ? root.accent : #2F2C29;
+        }
+        // skirt
+        Rectangle {
+            x: 10px;
+            y: 10px;
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: @linear-gradient(160deg, #D9DBDF 0%, #9A9EA6 45%, #4E5259 100%);
+            drop-shadow-blur: 6px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: #000000b0;
+        }
+        // knurled cap
+        Rectangle {
+            x: 14px;
+            y: 14px;
+            width: 36px;
+            height: 36px;
+            border-radius: 18px;
+            background: @linear-gradient(160deg, #46484D 0%, #1B1C1F 55%, #0B0B0C 100%);
+            border-width: 1px;
+            border-color: #000000;
+            Rectangle {
+                x: 7px;
+                y: 3px;
+                width: 22px;
+                height: 9px;
+                border-radius: 5px;
+                background: @linear-gradient(180deg, #ffffff26 0%, #ffffff00 100%);
+            }
+        }
         Path {
             width: 64px;
             height: 64px;
             viewbox-width: 64;
             viewbox-height: 64;
-            stroke: T.line-hi;
-            stroke-width: 4px;
-            commands: "M " + (32 + r * Math.sin(a0 * 1deg)) + " " + (32 - r * Math.cos(a0 * 1deg))
-                + " A " + r + " " + r + " 0 1 1 " + (32 + r * Math.sin(135deg)) + " " + (32 - r * Math.cos(135deg));
-        }
-        if hi-t - lo-t > 0.004: Path {
-            width: 64px;
-            height: 64px;
-            viewbox-width: 64;
-            viewbox-height: 64;
-            stroke: root.accent;
-            stroke-width: 4px;
-            commands: "M " + (32 + r * Math.sin(s0 * 1deg)) + " " + (32 - r * Math.cos(s0 * 1deg))
-                + " A " + r + " " + r + " 0 " + ((hi-t - lo-t) * 270 > 180 ? 1 : 0) + " 1 " + (32 + r * Math.sin(s1 * 1deg)) + " " + (32 - r * Math.cos(s1 * 1deg));
-        }
-        Text {
-            width: 52px;
-            x: 6px;
-            text: p.display;
-            horizontal-alignment: center;
-            overflow: elide;
-            color: ta.pressed ? root.accent : T.text;
-            font-family: T.mono;
-            font-size: p.display.character-count > 5 ? 10.5px : 13px;
-            font-weight: 600;
+            stroke: ta.pressed ? root.accent : #F4F1EA;
+            stroke-width: 2.6px;
+            MoveTo { x: 32 + 6 * Math.sin((-135 + 270 * root.t) * 1deg); y: 32 - 6 * Math.cos((-135 + 270 * root.t) * 1deg); }
+            LineTo { x: 32 + 16 * Math.sin((-135 + 270 * root.t) * 1deg); y: 32 - 16 * Math.cos((-135 + 270 * root.t) * 1deg); }
         }
     }
     Text {
-        y: 70px;
+        y: 64px;
         width: parent.width - 8px;
         x: 4px;
-        text: p.name;
+        text: p.name.to-uppercase();
         horizontal-alignment: center;
         overflow: elide;
-        color: active ? T.text : T.text-2;
+        color: active ? T.silk : T.silk-2;
+        font-family: T.display;
         font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }
+    Text {
+        y: 78px;
+        width: parent.width - 8px;
+        x: 4px;
+        text: p.display;
+        horizontal-alignment: center;
+        overflow: elide;
+        color: ta.pressed || active ? root.accent : T.text-2;
+        font-family: T.mono;
+        font-size: 11px;
+        font-weight: 600;
     }
     ta := TouchArea {
         mouse-cursor: ns-resize;
@@ -118,28 +154,29 @@ component RowCell inherits Rectangle {
     callback changed(int);
     callback enum-request;
     height: 92px;
-    if p.is-switch: Toggle {
+    if p.is-switch: LatchKey {
         x: (parent.width - self.width) / 2;
         y: 32px - self.height / 2;
-        width: 48px;
-        height: 26px;
+        text: p.value != 0 ? "ON" : "OFF";
         on: p.value != 0;
-        led: 1;
-        toggled(v) => { changed(v ? 1 : 0); }
+        c: T.led-red;
+        clicked => { changed(p.value != 0 ? 0 : 1); }
     }
     if !p.is-switch: Rectangle {
         x: 8px;
         y: 32px - self.height / 2;
         width: parent.width - 16px;
         height: 36px;
-        border-radius: T.r;
-        background: eta.has-hover ? T.hover : T.panel-hi;
+        border-radius: 6px;
+        background: @linear-gradient(180deg, #070707 0%, #121110 100%);
+        border-width: 1px;
+        border-color: eta.has-hover ? T.line-hi : #000000a0;
         HorizontalLayout {
             padding-left: 12px;
             padding-right: 10px;
             Text {
                 text: p.display;
-                color: T.text;
+                color: T.silk;
                 font-size: 13px;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
@@ -159,19 +196,18 @@ component RowCell inherits Rectangle {
         y: 70px;
         x: 4px;
         width: parent.width - 8px;
-        text: p.name;
-        color: T.text-2;
+        text: p.name.to-uppercase();
+        color: T.silk-2;
+        font-family: T.display;
         font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 1px;
         horizontal-alignment: center;
         overflow: elide;
     }
 }
 
-component Caption inherits Text {
-    color: T.text-2;
-    font-size: 12px;
-    font-weight: 600;
-}
+component Caption inherits Silk { }
 
 /// Segment of a pill-shaped segmented control. Disabled segments explain themselves on hover.
 component SegBtn inherits Rectangle {
@@ -184,12 +220,16 @@ component SegBtn inherits Rectangle {
     /// drive bars (0..5) left of the label, -1 none
     in property <int> bars: -1;
     callback clicked;
-    min-width: t.preferred-width + 24px + (bars >= 0 ? 26px : 0);
+    min-width: t.preferred-width + 28px + (bars >= 0 ? 26px : 0) + (active ? 16px : 0);
     horizontal-stretch: stretch ? 1 : 0;
-    height: 30px;
+    height: 32px;
     border-radius: 6px;
-    background: active ? accent : ta.has-hover && enabled ? T.hover : transparent;
-    animate background { duration: 100ms; }
+    background: active
+        ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%)
+        : ta.has-hover && enabled ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    border-width: 1px;
+    border-color: #000000b0;
+    if !active: Rectangle { x: 5px; y: 1px; width: parent.width - 10px; height: 1px; background: #ffffff16; }
     HorizontalLayout {
         alignment: center;
         spacing: 7px;
@@ -205,17 +245,23 @@ component SegBtn inherits Rectangle {
                     height: 4px + i * 2px;
                     border-radius: 1px;
                     background: i < root.bars
-                        ? (root.active ? T.accent-ink : root.enabled ? T.drive(root.bars) : T.text-off)
-                        : (root.active ? T.accent-ink.with-alpha(0.22) : #353943);
+                        ? (root.enabled ? T.drive(root.bars) : T.text-off)
+                        : #3A3632;
                 }
             }
         }
+        if root.active: VerticalLayout {
+            alignment: center;
+            Lamp { size: 8px; c: root.accent; lit: true; }
+        }
         t := Text {
-            text: root.text;
+            text: root.text.to-uppercase();
             vertical-alignment: center;
-            color: active ? T.accent-ink : enabled ? (ta.has-hover ? T.text : T.text-2) : T.text-off;
-            font-size: 12.5px;
-            font-weight: active ? 700 : 500;
+            color: active ? T.silk : enabled ? (ta.has-hover ? T.silk : T.silk-2) : T.text-off;
+            font-family: T.display;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 1px;
         }
     }
     ta := TouchArea {
@@ -230,12 +276,9 @@ component SegBtn inherits Rectangle {
 }
 
 component SegGroup inherits Rectangle {
-    height: 36px;
-    border-radius: 9px;
-    background: T.well;
+    height: 32px;
     HorizontalLayout {
-        padding: 3px;
-        spacing: 2px;
+        spacing: 5px;
         @children
     }
 }
@@ -262,7 +305,7 @@ component AmpTypeBand inherits Rectangle {
         VerticalLayout {
             horizontal-stretch: 1;
             spacing: 8px;
-            Caption { text: "Amp type"; }
+            Caption { text: "AMP TYPE"; }
             SegGroup {
                 for v in types: SegBtn {
                     text: v.n;
@@ -280,36 +323,12 @@ component AmpTypeBand inherits Rectangle {
         VerticalLayout {
             horizontal-stretch: 0;
             spacing: 8px;
-            Caption { text: "Modifiers"; }
-            Rectangle {
-                width: 150px;
-                height: 36px;
-                border-radius: 9px;
-                background: vta.has-hover ? T.hover : T.panel-hi;
-                HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 8px;
-                    spacing: 8px;
-                    Text {
-                        text: "Variation";
-                        color: variation ? T.text : T.text-2;
-                        font-size: 12.5px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        Toggle {
-                            on: variation;
-                            toggled(v) => { variation-toggled(v); }
-                        }
-                    }
-                }
-                vta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { variation-toggled(!variation); }
-                }
+            Caption { text: "MODIFIERS"; }
+            LatchKey {
+                text: "VARIATION";
+                on: variation;
+                c: root.accent;
+                clicked => { variation-toggled(!variation); }
             }
         }
     }
@@ -361,9 +380,13 @@ export component Inspector inherits Rectangle {
     property <length> band-h: band ? 96px : extra == 1 ? 168px : extra == 2 ? 74px : 0px;
 
     border-radius: T.r-card;
-    background: T.bg;
     clip: true;
     TouchArea { }
+    Faceplate {
+        width: parent.width;
+        height: parent.height;
+        border-radius: T.r-card;
+    }
 
     // ------------------------------------------------ header row
     HorizontalLayout {
@@ -376,52 +399,61 @@ export component Inspector inherits Rectangle {
         spacing: 14px;
         VerticalLayout {
             alignment: center;
+            // enamel badge in the block's colour, like a miniature of its enclosure
             Rectangle {
-                width: 34px;
-                height: 34px;
-                border-radius: 10px;
-                background: (has-sw && !on ? T.text-3 : root.accent).with-alpha(0.16);
+                width: 36px;
+                height: 36px;
+                border-radius: 7px;
+                background: @linear-gradient(165deg, root.hue.brighter(0.28) 0%, root.hue 40%, root.hue.darker(0.3) 100%);
+                border-width: 1px;
+                border-color: root.hue.darker(0.5);
+                drop-shadow-blur: 4px;
+                drop-shadow-offset-y: 2px;
+                drop-shadow-color: #00000090;
+                Rectangle { x: 4px; y: 1px; width: parent.width - 8px; height: 1px; background: #ffffff50; }
                 Path {
                     width: 20px;
                     height: 20px;
                     commands: Glyphs.path(root.kind);
                     viewbox-width: 24;
                     viewbox-height: 24;
-                    stroke: has-sw && !on ? T.text-3 : root.accent;
-                    stroke-width: 1.8px;
+                    stroke: root.ink;
+                    stroke-width: 1.9px;
                     fill: transparent;
                 }
             }
         }
         Text {
-            text: root.title;
-            color: T.text;
+            text: root.title.to-uppercase();
+            color: T.silk;
             font-family: T.display;
-            font-size: 21px;
+            font-size: 22px;
             font-weight: 700;
+            letter-spacing: 1.5px;
             vertical-alignment: center;
         }
         // type / model picker
         if has-types: VerticalLayout {
             alignment: center;
             Rectangle {
-                width: 220px;
+                width: 230px;
                 height: 34px;
-                border-radius: T.r;
-                background: tya.has-hover ? T.hover : T.panel-hi;
+                border-radius: 6px;
+                background: @linear-gradient(180deg, #070707 0%, #121110 100%);
+                border-width: 1px;
+                border-color: tya.has-hover ? T.line-hi : #000000a0;
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 10px;
                     spacing: 8px;
-                    if is-amp: Text {
-                        text: "Model";
-                        color: T.text-3;
-                        font-size: 12px;
+                    if is-amp: Silk {
+                        text: "MODEL";
+                        font-size: 11px;
                         vertical-alignment: center;
                     }
                     Text {
                         text: root.subtitle;
-                        color: T.text;
+                        color: T.accent;
                         font-size: 13px;
                         font-weight: 600;
                         vertical-alignment: center;
@@ -482,44 +514,33 @@ export component Inspector inherits Rectangle {
             }
         }
         // power
-        if has-sw: HorizontalLayout {
+        if has-sw: VerticalLayout {
             horizontal-stretch: 0;
-            spacing: 10px;
-            Text {
-                text: on ? "On" : "Bypassed";
-                color: on ? T.text : T.text-2;
-                font-size: 12.5px;
-                font-weight: 600;
-                vertical-alignment: center;
-            }
-            VerticalLayout {
-                alignment: center;
-                Toggle {
-                    width: 48px;
-                    height: 26px;
-                    on: root.on;
-                    toggled(v) => { toggle(v); }
-                }
+            alignment: center;
+            LatchKey {
+                text: on ? "ON" : "BYPASS";
+                on: root.on;
+                c: T.led-green;
+                clicked => { toggle(!root.on); }
             }
         }
         if !has-sw: HorizontalLayout {
             horizontal-stretch: 0;
             spacing: 8px;
-            VerticalLayout { alignment: center; Led { size: 7px; state: 1; } }
-            Text {
-                text: "Always on";
-                color: T.text-2;
-                font-size: 12.5px;
+            VerticalLayout { alignment: center; Lamp { size: 9px; c: T.led-green; lit: true; } }
+            Silk {
+                text: "ALWAYS ON";
                 vertical-alignment: center;
             }
         }
     }
     Rectangle {
         x: pad;
-        y: head-h - 1px;
+        y: head-h - 2px;
         width: parent.width - 2 * pad;
-        height: 1px;
-        background: T.line;
+        height: 2px;
+        Rectangle { y: 0; height: 1px; background: #00000099; }
+        Rectangle { y: 1px; height: 1px; background: #ffffff10; }
     }
 
     // ------------------------------------------------ parameters
@@ -547,8 +568,10 @@ export component Inspector inherits Rectangle {
             y: 20px;
             width: parent.width - 2 * pad;
             height: 136px;
-            border-radius: 10px;
-            background: T.panel;
+            border-radius: 8px;
+            background: @linear-gradient(180deg, #070707 0%, #100F0E 100%);
+            border-width: 1px;
+            border-color: #000000;
             clip: true;
             // octave grid (100 Hz, 1 kHz, 10 kHz) and the 0 dB line
             for gx in [0.233, 0.566, 0.9]: Rectangle {
@@ -616,16 +639,10 @@ export component Inspector inherits Rectangle {
             }
             VerticalLayout {
                 alignment: center;
-                Rectangle {
-                    width: tt.preferred-width + 22px;
-                    height: 30px;
-                    border-radius: 15px;
-                    background: tpa.pressed ? root.accent.with-alpha(0.3) : tpa.has-hover ? T.hover : T.panel-hi;
-                    tt := Text { text: "Tap"; color: T.text; font-size: 12px; font-weight: 600; }
-                    tpa := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.tap(); }
-                    }
+                LatchKey {
+                    text: "TAP";
+                    lamp: false;
+                    clicked => { root.tap(); }
                 }
             }
             Rectangle { width: 6px; }
