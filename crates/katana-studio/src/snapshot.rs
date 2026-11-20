@@ -54,6 +54,9 @@ pub fn render(lib: katana_core::Library, out: &str, tab: i32, hover: Option<(f32
     if let Some(z) = std::env::var("HAZE_SCALE").ok().and_then(|v| v.parse::<f32>().ok()) {
         ui.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: z / 100.0 });
     }
+    if std::env::var_os("HAZE_KEYS").is_some() {
+        ui.set_show_keys(true);
+    }
     // HAZE_ADD=i: "add to setlist" dialog for visible tone #i
     if let Some(i) = std::env::var("HAZE_ADD").ok().and_then(|v| v.parse().ok()) {
         ui.set_add_tone(i);

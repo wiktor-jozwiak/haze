@@ -2,7 +2,7 @@
 // rows of the quick preset picker window. No permanent side list: the rig gets the full width.
 import { ListView } from "std-widgets.slint";
 import { T } from "theme.slint";
-import { Icon, Icons, Tip } from "widgets.slint";
+import { Icon, Icons, Tip, Glyphs } from "widgets.slint";
 import { LedImg } from "rig.slint";
 
 export struct ToneRow {
@@ -70,6 +70,49 @@ export component Chip inherits Rectangle {
     }
 }
 
+/// Effect signature: Booster, Mod, FX, Delay, Reverb as block glyphs, lit in the block colour
+/// when on, grey when off. `labels` adds the block name (wide places: live view, legend).
+export component FxSig inherits HorizontalLayout {
+    in property <[int]> leds;
+    in property <length> h: 20px;
+    in property <bool> labels;
+    spacing: labels ? 8px : 4px;
+    for l[i] in leds: Rectangle {
+        property <bool> on: l > 0;
+        property <color> c: T.fx(i);
+        width: labels ? row.preferred-width + root.h * 0.7 : root.h + 2px;
+        height: root.h;
+        border-radius: root.h * 0.28;
+        background: on ? c.with-alpha(0.16) : #1C1F25;
+        border-width: 1px;
+        border-color: on ? c.with-alpha(0.55) : #262A31;
+        row := HorizontalLayout {
+            alignment: center;
+            spacing: root.h * 0.3;
+            VerticalLayout {
+                alignment: center;
+                Path {
+                    width: root.h * 0.66;
+                    height: root.h * 0.66;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: Glyphs.path([2, 3, 7, 8, 10][i]);
+                    stroke: on ? c : #4A505B;
+                    stroke-width: root.h >= 30px ? 2px : 1.6px;
+                    fill: transparent;
+                }
+            }
+            if labels: Text {
+                text: ["Boost", "Mod", "FX", "Delay", "Reverb"][i];
+                color: on ? T.text : T.text-3;
+                font-size: root.h * 0.42;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
 /// One preset in the grid: name, amp, active effects and a five-block signature strip
 /// (Booster, Mod, FX, Delay, Reverb lit in their block colours).
 export component PresetCard inherits Rectangle {
@@ -118,16 +161,11 @@ export component PresetCard inherits Rectangle {
         font-size: 11.5px;
     }
     // effect signature
-    HorizontalLayout {
+    FxSig {
         x: 16px;
-        y: parent.height - 30px;
-        height: 12px;
-        spacing: 4px;
-        for l[i] in tone.leds: Rectangle {
-            width: 20px;
-            border-radius: 3px;
-            background: l > 0 ? T.fx(i) : #262931;
-        }
+        y: parent.height - 34px;
+        h: 20px;
+        leds: tone.leds;
     }
     if tone.live: Rectangle {
         x: parent.width - self.width - 14px;
@@ -209,7 +247,6 @@ export component PresetCard inherits Rectangle {
 export component LibraryGrid inherits Rectangle {
     in property <[ToneRow]> tones;
     in property <int> selected-index: -1;
-    in property <string> empty-text;
     callback clicked(int);
     callback opened(int);
     callback fav(int);
@@ -235,14 +272,6 @@ export component LibraryGrid inherits Rectangle {
                 }
             }
         }
-    }
-    if tones.length == 0: Text {
-        width: Math.min(parent.width - 48px, 460px);
-        text: root.empty-text;
-        wrap: word-wrap;
-        horizontal-alignment: center;
-        color: T.text-2;
-        font-size: 14px;
     }
 }
 
@@ -419,14 +448,11 @@ export component SongRow inherits Rectangle {
         // effect signature (hidden while the row shows its actions)
         if !ta.has-hover || !editable: HorizontalLayout {
             horizontal-stretch: 0;
-            spacing: 4px;
-            for l[i] in tone.leds: VerticalLayout {
+            VerticalLayout {
                 alignment: center;
-                Rectangle {
-                    width: 16px;
-                    height: 10px;
-                    border-radius: 3px;
-                    background: l > 0 ? T.fx(i) : #262931;
+                FxSig {
+                    h: 22px;
+                    leds: tone.leds;
                 }
             }
         }

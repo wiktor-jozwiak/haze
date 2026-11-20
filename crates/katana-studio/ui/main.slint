@@ -11,8 +11,9 @@ import { LibraryPage } from "page-library.slint";
 import { SetlistsPage } from "page-setlists.slint";
 import { StartersPage } from "page-starters.slint";
 import { Picker } from "picker.slint";
-import { SlotPicker, ConfirmWrite, ImportDialog, AddToSetlist, TagsDialog } from "dialogs.slint";
+import { SlotPicker, ConfirmWrite, ImportDialog, AddToSetlist, TagsDialog, KeysDialog } from "dialogs.slint";
 import { LiveView } from "live.slint";
+import { EmptyState } from "art.slint";
 
 export { T, Pedal, PedalKnob, ToneRow, NavItem, Essential, ParamRow, TemplateRow, BlockChip, Slot, Opt }
 
@@ -214,6 +215,7 @@ export component MainWindow inherits Window {
     property <int> confirm-slot: -1;
     property <bool> show-import;
     property <bool> show-tags;
+    in-out property <bool> show-keys;
     in-out property <int> add-tone: -1;
     property <bool> show-slot-picker;
     in-out property <bool> show-picker;
@@ -234,6 +236,15 @@ export component MainWindow inherits Window {
     property <length> pitch: pw + ps;
     property <length> left: (board-w - pedals.length * pitch) / 2;
     property <int> drag-from: -1;
+    // help line above the chain: which pedal and which part of it is under the pointer
+    property <int> hint-pedal: -1;
+    property <int> hint-zone: 0;
+    property <string> hint-text: hint-zone == 0 || hint-pedal < 0 || hint-pedal >= pedals.length
+        ? "Click a block to edit it  ·  drag it to reorder"
+        : pedals[hint-pedal].title + ":  " + (
+            hint-zone == 2 ? "drag up / down or scroll to turn a knob"
+            : hint-zone == 3 ? (pedals[hint-pedal].on ? "click the footswitch to bypass" : "click the footswitch to switch it on")
+            : pedals[hint-pedal].movable ? "click to edit  ·  drag to move in the chain" : "click to edit");
     property <length> drag-x;
     property <int> gap: clamp(floor((drag-x - left + ps / 2) / pitch + 0.5), 0, pedals.length);
 
@@ -241,6 +252,7 @@ export component MainWindow inherits Window {
         // ================================================= top bar: brand+mode | device | meters+actions
         Rectangle {
             height: 56px;
+            z: 10; // its tooltips hang over the page below
             HorizontalLayout {
                 padding-left: 16px;
                 padding-right: 12px;
@@ -312,12 +324,14 @@ export component MainWindow inherits Window {
                         spacing: 2px;
                         ModeBtn {
                             text: "Hardware";
+                            tip: "Edit the Katana over USB: every change plays on the amp";
                             led: T.amber;
                             active: hw-mode;
                             clicked => { mode-picked(true); }
                         }
                         ModeBtn {
                             text: "Standalone";
+                            tip: "Play through this PC: built-in amp, cab and effects, no Katana needed";
                             led: T.cyan;
                             active: !hw-mode;
                             clicked => { mode-picked(false); }
@@ -456,6 +470,14 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     alignment: center;
                     IconBtn {
+                        icon: Icons.help;
+                        tip: "Keyboard shortcuts (F1)";
+                        clicked => { show-keys = true; }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconBtn {
                         icon: Icons.gear;
                         tip: "Settings";
                         clicked => { settings.show(); }
@@ -552,28 +574,19 @@ export component MainWindow inherits Window {
                 background: T.bg;
                 clip: true;
 
-                if !has-selection: VerticalLayout {
-                    alignment: center;
-                    spacing: 14px;
-                    Text {
-                        text: "No preset loaded";
-                        horizontal-alignment: center;
-                        color: T.text;
-                        font-size: 18px;
-                        font-weight: 700;
+                if !has-selection: EmptyState {
+                    art: 0;
+                    compact: true;
+                    title: "No preset loaded";
+                    body: "Pick one of your presets, or start from a ready-made rig and shape it here.";
+                    Btn {
+                        primary: true;
+                        text: "Browse presets  ·  Ctrl+K";
+                        clicked => { show-picker = true; }
                     }
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 8px;
-                        Btn {
-                            primary: true;
-                            text: "Browse presets";
-                            clicked => { show-picker = true; }
-                        }
-                        Btn {
-                            text: "Start from a starter rig";
-                            clicked => { page-picked(3); }
-                        }
+                    Btn {
+                        text: "Start from a starter rig";
+                        clicked => { page-picked(3); }
                     }
                 }
                 if has-selection: VerticalLayout {
@@ -825,8 +838,8 @@ export component MainWindow inherits Window {
                             horizontal-alignment: right;
                             vertical-alignment: center;
                             font-size: 12px;
-                            text: drag-from >= 0 ? (drop-ok[gap] ? "Release to reorder" : "The Katana can't run blocks in this order") : "Drag blocks to reorder";
-                            color: drag-from < 0 ? T.text-3 : drop-ok[gap] ? T.led-green : T.led-red;
+                            text: drag-from >= 0 ? (drop-ok[gap] ? "Release to reorder" : "The Katana can't run blocks in this order") : hint-text;
+                            color: drag-from >= 0 ? (drop-ok[gap] ? T.led-green : T.led-red) : hint-zone > 0 ? T.text : T.text-3;
                         }
                     }
                     Rectangle { height: 8px; }
@@ -890,6 +903,14 @@ export component MainWindow inherits Window {
                             clicked => { pedal-clicked(i); }
                             toggled => { pedal-toggled(i); }
                             knob-set(k, x) => { pedal-knob-set(i, k, x); }
+                            zone-changed(z) => {
+                                if z > 0 {
+                                    hint-pedal = i;
+                                    hint-zone = z;
+                                } else if hint-pedal == i {
+                                    hint-zone = 0;
+                                }
+                            }
                             knob-step(k, d) => { pedal-knob-step(i, k, d); }
                             drag-start => {
                                 drag-from = i;
@@ -1030,6 +1051,7 @@ export component MainWindow inherits Window {
                 set-rename(n) => { root.set-rename(n); }
                 set-add-current => { root.set-add-current(); }
                 live => { live-open = true; }
+                browse => { page-picked(1); }
                 export-list => { root.export-list(); }
                 tone-clicked(i) => { root.tone-clicked(i); }
                 tone-opened(i) => {
@@ -1101,6 +1123,10 @@ export component MainWindow inherits Window {
             }
             if e.modifiers.control && (e.text == "y" || e.text == "Y") {
                 redo();
+                return accept;
+            }
+            if e.text == Key.F1 || e.text == "?" {
+                show-keys = true;
                 return accept;
             }
             if e.modifiers.control && (e.text == "l" || e.text == "L") {
@@ -1202,6 +1228,13 @@ export component MainWindow inherits Window {
         picked(id) => {
             tone-add-to(add-tone, id);
             add-tone = -1;
+        }
+    }
+
+    if show-keys: KeysDialog {
+        dismissed => {
+            show-keys = false;
+            keys.focus();
         }
     }
 

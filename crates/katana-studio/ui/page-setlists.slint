@@ -3,6 +3,7 @@ import { T } from "theme.slint";
 import { Btn, Icons } from "widgets.slint";
 import { ToneRow, NavItem, SetRow, SongRow } from "library.slint";
 import { ToolBtn } from "parts.slint";
+import { EmptyState } from "art.slint";
 
 /// Setlists page: collections column | numbered songs of the selected one.
 export component SetlistsPage inherits HorizontalLayout {
@@ -17,6 +18,7 @@ export component SetlistsPage inherits HorizontalLayout {
     callback set-rename(string);
     callback set-add-current();
     callback live();
+    callback browse();
     callback export-list();
     callback tone-clicked(int);
     callback tone-opened(int);
@@ -77,29 +79,14 @@ export component SetlistsPage inherits HorizontalLayout {
         horizontal-stretch: 1;
         border-radius: T.r-card;
         background: T.bg;
-        if nav-selected == "": VerticalLayout {
-            alignment: center;
-            spacing: 12px;
-            Text {
-                text: "Build your first setlist";
-                horizontal-alignment: center;
-                color: T.text;
-                font-size: 18px;
-                font-weight: 700;
-            }
-            Text {
-                text: "Group presets in the order you play them. Imported .tsl collections and amp backups show up here too.";
-                horizontal-alignment: center;
-                wrap: word-wrap;
-                color: T.text-2;
-            }
-            HorizontalLayout {
-                alignment: center;
-                Btn {
-                    primary: true;
-                    text: "New setlist";
-                    clicked => { set-new(); }
-                }
+        if nav-selected == "": EmptyState {
+            art: 1;
+            title: "Build your first setlist";
+            body: "Group presets in the order you play them, then run the gig from Live view. Imported .tsl collections and amp backups show up here too.";
+            Btn {
+                primary: true;
+                text: "New setlist";
+                clicked => { set-new(); }
             }
         }
         if nav-selected != "": VerticalLayout {
@@ -180,12 +167,15 @@ export component SetlistsPage inherits HorizontalLayout {
                         removed => { song-remove(i); }
                     }
                 }
-                if tones.length == 0: Text {
-                    width: Math.min(parent.width - 48px, 420px);
-                    text: "This setlist is empty. Load a preset on the Rig or pick one in the Library, then use “Add current preset”.";
-                    wrap: word-wrap;
-                    horizontal-alignment: center;
-                    color: T.text-2;
+                if tones.length == 0: EmptyState {
+                    art: 1;
+                    compact: true;
+                    title: "No songs yet";
+                    body: "Use + on a preset card in the Library, or load a preset on the Rig and press “Add current preset”.";
+                    Btn {
+                        text: "Open Library";
+                        clicked => { root.browse(); }
+                    }
                 }
             }
         }

@@ -143,6 +143,10 @@ export component PedalView inherits Rectangle {
     in property <bool> ghost;
     in property <bool> lifted;
     out property <bool> hovered: body-ta.has-hover || sw-ta.has-hover || knob-ta.has-hover;
+    /// what the pointer is over: 0 nothing, 1 body, 2 knobs, 3 footswitch (drives the help line)
+    out property <int> zone: knob-ta.has-hover ? 2 : sw-ta.has-hover ? 3 : body-ta.has-hover ? 1 : 0;
+    callback zone-changed(int);
+    changed zone => { root.zone-changed(self.zone); }
     out property <bool> dragging;
     /// distance from the top of the box to the centre of its side jacks (cables run there)
     out property <length> jack-y: 62px;

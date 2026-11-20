@@ -1,0 +1,231 @@
+// Vector spot illustrations for empty states. Flat shapes in the theme colours, no bitmaps:
+// they scale with the interface size and cost nothing to ship.
+import { T } from "theme.slint";
+
+/// 0 pedal (nothing loaded / no presets), 1 setlist, 2 search miss, 3 favourites.
+export component EmptyArt inherits Rectangle {
+    in property <int> kind;
+    width: 160px;
+    height: 120px;
+    // soft halo
+    Rectangle {
+        x: 20px;
+        y: 4px;
+        width: 120px;
+        height: 112px;
+        border-radius: 56px;
+        background: @radial-gradient(circle, T.accent.with-alpha(0.13) 0%, T.accent.with-alpha(0.0) 70%);
+    }
+
+    // ---- 0: stompbox with a cable plugged in
+    if kind == 0: Rectangle {
+        // cable
+        Path {
+            width: 160px;
+            height: 120px;
+            viewbox-width: 160;
+            viewbox-height: 120;
+            commands: "M4 96 C24 96 30 50 54 50";
+            stroke: #3A3E47;
+            stroke-width: 4px;
+            fill: transparent;
+        }
+        Rectangle { x: 50px; y: 45px; width: 8px; height: 10px; border-radius: 2px; background: #8C9099; }
+        // body
+        Rectangle {
+            x: 56px;
+            y: 14px;
+            width: 56px;
+            height: 92px;
+            border-radius: 9px;
+            background: @linear-gradient(180deg, T.accent-hi 0%, T.accent 45%, T.accent.darker(0.25) 100%);
+            drop-shadow-blur: 14px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: #00000080;
+            for k[i] in 2: Rectangle {
+                x: 9px + i * 22px;
+                y: 9px;
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                background: #15161A;
+                border-width: 2px;
+                border-color: #D8DBE0;
+                Rectangle { x: 7px; y: 2px; width: 2px; height: 6px; background: #F4F5F7; }
+            }
+            Rectangle { x: 25px; y: 34px; width: 6px; height: 6px; border-radius: 3px; background: T.led-green; }
+            Rectangle { x: 12px; y: 46px; width: 32px; height: 4px; border-radius: 2px; background: T.accent-ink.with-alpha(0.5); }
+            Rectangle {
+                x: 16px;
+                y: 62px;
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: @linear-gradient(135deg, #F3F4F6 0%, #9196A0 100%);
+                border-width: 1px;
+                border-color: #2E3036;
+            }
+        }
+        // sparkle
+        Path {
+            x: 118px;
+            y: 12px;
+            width: 22px;
+            height: 22px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M12 2 L13.6 10.4 L22 12 L13.6 13.6 L12 22 L10.4 13.6 L2 12 L10.4 10.4 Z";
+            fill: T.accent-hi;
+        }
+    }
+
+    // ---- 1: setlist: numbered sheets
+    if kind == 1: Rectangle {
+        for r[i] in 3: Rectangle {
+            x: 34px + i * 6px;
+            y: 18px + i * 26px;
+            width: 98px - i * 6px;
+            height: 22px;
+            border-radius: 6px;
+            background: i == 0 ? T.panel-hi : T.panel;
+            border-width: 1px;
+            border-color: i == 0 ? T.accent.with-alpha(0.6) : T.line-hi;
+            Text {
+                x: 7px;
+                text: "0" + (i + 1);
+                color: i == 0 ? T.accent : T.text-3;
+                font-family: T.mono;
+                font-size: 10px;
+                font-weight: 700;
+            }
+            Rectangle { x: 28px; y: 7px; width: parent.width * 0.42; height: 4px; border-radius: 2px; background: i == 0 ? T.text-2 : T.line-hi; }
+            Rectangle { x: 28px; y: 13px; width: parent.width * 0.26; height: 3px; border-radius: 1.5px; background: T.line-hi; }
+            for b[j] in 3: Rectangle {
+                x: parent.width - 34px + j * 9px;
+                y: 8px;
+                width: 6px;
+                height: 6px;
+                border-radius: 2px;
+                background: i == 0 ? T.fx(j * 2) : #2A2D35;
+            }
+        }
+        // plus badge
+        Rectangle {
+            x: 116px;
+            y: 84px;
+            width: 26px;
+            height: 26px;
+            border-radius: 13px;
+            background: T.accent;
+            Path {
+                width: 14px;
+                height: 14px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M12 4 L12 20 M4 12 L20 12";
+                stroke: T.accent-ink;
+                stroke-width: 3px;
+            }
+        }
+    }
+
+    // ---- 2: search miss: magnifier over an empty card
+    if kind == 2: Rectangle {
+        Rectangle {
+            x: 30px;
+            y: 30px;
+            width: 80px;
+            height: 58px;
+            border-radius: 8px;
+            background: T.panel;
+            border-width: 1px;
+            border-color: T.line-hi;
+            Rectangle { x: 10px; y: 12px; width: 40px; height: 5px; border-radius: 2.5px; background: T.line-hi; }
+            Rectangle { x: 10px; y: 23px; width: 26px; height: 4px; border-radius: 2px; background: T.line-hi; }
+            for b[j] in 5: Rectangle {
+                x: 10px + j * 12px;
+                y: 40px;
+                width: 9px;
+                height: 8px;
+                border-radius: 2px;
+                background: #2A2D35;
+            }
+        }
+        Path {
+            x: 74px;
+            y: 38px;
+            width: 58px;
+            height: 58px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M10 3 A7 7 0 1 0 10 17 A7 7 0 1 0 10 3 Z M15 15 L21 21";
+            stroke: T.accent;
+            stroke-width: 2.6px;
+            fill: T.bg.with-alpha(0.6);
+        }
+    }
+
+    // ---- 3: favourites: star with orbit sparkles
+    if kind == 3: Rectangle {
+        Path {
+            x: 46px;
+            y: 22px;
+            width: 68px;
+            height: 68px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M12 2.8 L14.8 8.6 L21.2 9.4 L16.5 13.8 L17.7 20.2 L12 17.1 L6.3 20.2 L7.5 13.8 L2.8 9.4 L9.2 8.6 Z";
+            stroke: T.accent;
+            stroke-width: 1.6px;
+            fill: T.accent.with-alpha(0.18);
+        }
+        for d in [{ x: 30px, y: 30px, s: 8px }, { x: 122px, y: 46px, s: 6px }, { x: 108px, y: 96px, s: 9px }, { x: 40px, y: 92px, s: 5px }]: Rectangle {
+            x: d.x;
+            y: d.y;
+            width: d.s;
+            height: d.s;
+            border-radius: d.s / 2;
+            background: T.accent-hi.with-alpha(0.7);
+        }
+    }
+}
+
+/// Illustration, title, one sentence, and the actions as children.
+export component EmptyState inherits VerticalLayout {
+    in property <int> art;
+    in property <string> title;
+    in property <string> body;
+    in property <bool> compact;
+    alignment: center;
+    spacing: compact ? 8px : 12px;
+    HorizontalLayout {
+        alignment: center;
+        EmptyArt {
+            kind: root.art;
+        }
+    }
+    Text {
+        text: root.title;
+        horizontal-alignment: center;
+        color: T.text;
+        font-size: compact ? 15px : 18px;
+        font-weight: 700;
+    }
+    HorizontalLayout {
+        alignment: center;
+        Text {
+            width: Math.min(440px, root.width - 48px);
+            text: root.body;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            color: T.text-2;
+            font-size: compact ? 12.5px : 13.5px;
+        }
+    }
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        padding-top: 6px;
+        @children
+    }
+}

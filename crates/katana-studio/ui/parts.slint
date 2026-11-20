@@ -131,6 +131,7 @@ export component ModeBtn inherits Rectangle {
     in property <string> text;
     in property <color> led;
     in property <bool> active;
+    in property <string> tip;
     callback clicked;
     width: row.preferred-width + 28px;
     border-radius: 7px;
@@ -158,6 +159,11 @@ export component ModeBtn inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+    if ta.has-hover && tip != "": Tip {
+        x: 0;
+        y: parent.height + 8px;
+        text: root.tip;
     }
 }
 

@@ -1,6 +1,6 @@
 import { T } from "theme.slint";
 import { Icon, Icons } from "widgets.slint";
-import { ToneRow } from "library.slint";
+import { ToneRow, FxSig } from "library.slint";
 
 component BigStep inherits Rectangle {
     in property <string> icon;
@@ -128,15 +128,11 @@ export component LiveView inherits Rectangle {
         }
         HorizontalLayout {
             alignment: center;
-            spacing: 8px;
-            height: 18px;
-            if root.has: HorizontalLayout {
-                spacing: 8px;
-                for l[i] in tones[selected-index].leds: Rectangle {
-                    width: 44px;
-                    border-radius: 4px;
-                    background: l > 0 ? T.fx(i) : #1E2127;
-                }
+            height: 40px;
+            if root.has: FxSig {
+                h: 40px;
+                labels: true;
+                leds: tones[selected-index].leds;
             }
         }
         Rectangle { height: 8px; }

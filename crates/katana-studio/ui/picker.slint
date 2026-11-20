@@ -3,6 +3,7 @@ import { T } from "theme.slint";
 import { SearchField } from "widgets.slint";
 import { ToneRow, Essential, Chip, ToneItem } from "library.slint";
 import { Menu, ModeBtn, Well } from "parts.slint";
+import { EmptyState } from "art.slint";
 
 /// Quick preset picker: a floating window over the rig, closed by a pick, Esc or a click outside.
 export component Picker inherits Rectangle {
@@ -102,9 +103,11 @@ export component Picker inherits Rectangle {
                             }
                         }
                     }
-                    if tones.length == 0: Text {
-                        text: "No presets match.";
-                        color: T.text-2;
+                    if tones.length == 0: EmptyState {
+                        art: 2;
+                        compact: true;
+                        title: "No presets match";
+                        body: "Try another name, amp or effect.";
                     }
                 }
                 HorizontalLayout {

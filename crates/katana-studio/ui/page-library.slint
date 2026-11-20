@@ -2,6 +2,8 @@ import { T } from "theme.slint";
 import { SearchField, Icons } from "widgets.slint";
 import { ToneRow, Chip, LibraryGrid } from "library.slint";
 import { ModeBtn, Well, ToolBtn, Menu, MenuItem } from "parts.slint";
+import { EmptyState } from "art.slint";
+import { Btn } from "widgets.slint";
 
 /// Library page: All/Favorites, search, style chips, toolbar and the preset card grid.
 export component LibraryPage inherits VerticalLayout {
@@ -123,14 +125,52 @@ export component LibraryPage inherits VerticalLayout {
             }
         }
     }
-    LibraryGrid {
+    Rectangle {
         vertical-stretch: 1;
-        tones: tones;
-        selected-index: selected-index;
-        empty-text: nav-selected == "fav" ? "No favorites yet. Star a preset to add it here." : query != "" || tag != "" ? "No presets match this filter." : "No presets yet. Import them from BOSS Tone Studio or a .tsl file.";
-        clicked(i) => { tone-clicked(i); }
-        opened(i) => { tone-opened(i); }
-        fav(i) => { tone-fav(i); }
-        add(i) => { tone-add(i); }
+        LibraryGrid {
+            tones: tones;
+            selected-index: selected-index;
+            clicked(i) => { tone-clicked(i); }
+            opened(i) => { tone-opened(i); }
+            fav(i) => { tone-fav(i); }
+            add(i) => { tone-add(i); }
+        }
+        if tones.length == 0 && (query != "" || tag != ""): EmptyState {
+            art: 2;
+            title: "Nothing matches";
+            body: "No preset fits this search or filter. Try fewer words, or clear the filter.";
+            Btn {
+                text: "Clear search and filter";
+                clicked => {
+                    query = "";
+                    search("");
+                    tag-picked("");
+                }
+            }
+        }
+        if tones.length == 0 && query == "" && tag == "" && nav-selected == "fav": EmptyState {
+            art: 3;
+            title: "No favorites yet";
+            body: "Star a preset (the ☆ on its card or next to its name on the Rig) and it shows up here and in the quick picker.";
+            Btn {
+                text: "Show all presets";
+                clicked => { nav-clicked("all"); }
+            }
+        }
+        if tones.length == 0 && query == "" && tag == "" && nav-selected != "fav": EmptyState {
+            art: 0;
+            title: "Your library is empty";
+            body: "Import your presets from BOSS Tone Studio or a .tsl file, back up the amp's channels, or add a starter rig.";
+            Btn {
+                primary: true;
+                text: "Import presets";
+                clicked => { import-request(); }
+            }
+            Btn {
+                text: "Back up amp";
+                enabled: connected;
+                clicked => { backup-amp(); }
+            }
+        }
     }
 }

@@ -253,3 +253,89 @@ export component TagsDialog inherits Modal {
         }
     }
 }
+
+component KeyCap inherits Rectangle {
+    in property <string> text;
+    height: 24px;
+    width: Math.max(24px, kt.preferred-width + 14px);
+    border-radius: 5px;
+    background: T.panel-hi;
+    border-width: 1px;
+    border-color: T.line-hi;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #00000080;
+    kt := Text {
+        text: root.text;
+        color: T.text;
+        font-family: T.mono;
+        font-size: 11.5px;
+        font-weight: 700;
+    }
+}
+
+/// Every keyboard shortcut and mouse gesture on one card (F1 / ? button).
+export component KeysDialog inherits Modal {
+    card-w: 740px;
+    card-h: 404px;
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if e.text == Key.Escape || e.text == Key.F1 || e.text == "?" {
+                root.dismissed();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+            HorizontalLayout {
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Shortcuts";
+                    font-family: T.display;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: T.text;
+                }
+                KeyCap { text: "Esc"; }
+            }
+            HorizontalLayout {
+                spacing: 28px;
+                for col in [
+                    [{ k: ["Ctrl", "K"], d: "Find a preset" }, { k: ["Ctrl", "Z"], d: "Undo" }, { k: ["Ctrl", "Y"], d: "Redo" },
+                     { k: ["Ctrl", "1…4"], d: "Rig / Library / Setlists / Starters" }, { k: ["Ctrl", "L"], d: "Live view" },
+                     { k: ["Space"], d: "Play / stop the DI loop (Standalone)" }, { k: ["F1"], d: "This card" }],
+                    [{ k: ["Click"], d: "Pedal: open it in the editor" }, { k: ["Footswitch"], d: "Bypass / switch on" },
+                     { k: ["Drag", "↕"], d: "Knob on a pedal: turn it" }, { k: ["Scroll"], d: "Knob on a pedal: fine steps" },
+                     { k: ["Drag", "↔"], d: "Pedal: move it in the chain" }, { k: ["← →"], d: "Live view: previous / next song" },
+                     { k: ["Dbl-click"], d: "Card or song: open on the Rig" }]
+                ]: VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 10px;
+                    for r in col: HorizontalLayout {
+                        height: 30px;
+                        spacing: 10px;
+                        HorizontalLayout {
+                            width: 112px;
+                            spacing: 4px;
+                            alignment: start;
+                            for k in r.k: VerticalLayout {
+                                alignment: center;
+                                KeyCap { text: k; }
+                            }
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: r.d;
+                            color: T.text-2;
+                            font-size: 12.5px;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
