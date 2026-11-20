@@ -1,86 +1,101 @@
 #!/usr/bin/env python3
-"""Generates packaging/haze.svg: Mist's dusk scene + glass card, with an amp knob as the mark."""
-import math, pathlib
+"""Generates the Haze app icon in the Mist tile family (Files / Player / Settings):
+superellipse tile, saturated gradient, one glossy lifted object, top sheen, glass rim.
 
-cx, cy = 256, 236
-def pt(a, r):
-    a = math.radians(a)
-    return cx + r * math.sin(a), cy - r * math.cos(a)
+Mark: a cream guitar pick with the Haze wave pressed into it, on an ember-orange tile.
+Writes packaging/haze.svg, packaging/haze-{32..512}.png and ui/art/icon.png (window icon).
+Needs rsvg-convert. Run from anywhere: python3 tools/make_icon.py
+"""
+import math, pathlib, subprocess
 
-ticks = []
-for i in range(11):
-    a = -135 + i * 27
-    x1, y1 = pt(a, 96); x2, y2 = pt(a, 108)
-    lit = a <= 60
-    ticks.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{"#f3a35c" if lit else "#f5efe9"}" '
-                 f'stroke-opacity="{0.95 if lit else 0.35}" stroke-width="5" stroke-linecap="round"/>')
-ax, ay = pt(-135, 82); bx, by = pt(60, 82)
-px1, py1 = pt(60, 18); px2, py2 = pt(60, 50)
+root = pathlib.Path(__file__).resolve().parent.parent
 
-svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+# Same tile as the Mist icons: superellipse n=5, r=412 around (512,512) on a 1024 canvas.
+def squircle(n=5.0, r=412.0, c=512.0, steps=176):
+    pts = []
+    for i in range(steps):
+        t = 2 * math.pi * i / steps
+        ct, st = math.cos(t), math.sin(t)
+        x = c + r * math.copysign(abs(ct) ** (2 / n), ct)
+        y = c + r * math.copysign(abs(st) ** (2 / n), st)
+        pts.append(f"{x:.1f},{y:.1f}")
+    return "M" + " L".join(pts) + " Z"
+
+tile = squircle()
+
+# Classic 351-shape pick, point down.
+pick = ("M512,268 C640,268 764,288 772,372 C780,456 642,642 562,732 "
+        "C536,760 488,760 462,732 C382,642 244,456 252,372 C260,288 384,268 512,268 Z")
+# Haze wave: three soft crests, same rhythm as the in-app brand glyph.
+wave = "M366,462 Q402,392 439,462 T512,462 T585,462 T658,462"
+
+svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Haze</title>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#140f1c"/>
-      <stop offset="0.55" stop-color="#2b1d26"/>
-      <stop offset="1" stop-color="#5a3826"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#f59a4a"/><stop offset="0.55" stop-color="#d4602c"/><stop offset="1" stop-color="#8e3219"/>
     </linearGradient>
-    <radialGradient id="sun" cx="0.5" cy="0.85" r="0.6">
-      <stop offset="0" stop-color="#f3a35c" stop-opacity="0.9"/>
-      <stop offset="0.5" stop-color="#c46a3c" stop-opacity="0.3"/>
-      <stop offset="1" stop-color="#c46a3c" stop-opacity="0"/>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.22"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.95" r="0.75">
+      <stop offset="0" stop-color="#ffd08a" stop-opacity="0.40"/><stop offset="1" stop-color="#ffd08a" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="dune" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3d241c"/>
-      <stop offset="1" stop-color="#180e0c"/>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d8b88e"/><stop offset="1" stop-color="#a87a4e"/>
     </linearGradient>
-    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0.06"/>
+    <linearGradient id="face" x1="0.2" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#fffaf1"/><stop offset="0.6" stop-color="#f4e6cf"/><stop offset="1" stop-color="#e6cfac"/>
     </linearGradient>
-    <linearGradient id="arc" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#c46a3c"/>
-      <stop offset="1" stop-color="#f6b86e"/>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
-    <radialGradient id="cap" cx="0.42" cy="0.35" r="0.75">
-      <stop offset="0" stop-color="#fbf6f0"/>
-      <stop offset="0.7" stop-color="#e6dbcf"/>
-      <stop offset="1" stop-color="#bfae9d"/>
-    </radialGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.45"/>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.32"/>
     </filter>
-    <filter id="knobshadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#000000" flood-opacity="0.5"/>
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#4a1406" flood-opacity="0.50"/>
     </filter>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="5"/>
-    </filter>
+    <clipPath id="tile"><path d="{tile}"/></clipPath>
+    <clipPath id="pickclip"><path d="{pick}"/></clipPath>
   </defs>
-
-  <!-- Background (Mist dusk) -->
-  <rect width="512" height="512" fill="url(#bg)"/>
-  <circle cx="256" cy="380" r="240" fill="url(#sun)"/>
-  <path d="M 0,380 Q 140,320 280,360 T 512,340 L 512,512 L 0,512 Z" fill="url(#dune)"/>
-
-  <!-- Glass card -->
-  <rect x="96" y="96" width="320" height="320" rx="72" fill="url(#glass)" stroke="#ffffff" stroke-opacity="0.3" stroke-width="2.5" filter="url(#shadow)"/>
-
-  <!-- Scale: ticks + value arc (cranked past 7) -->
-  {chr(10).join("  " + t for t in ticks)}
-  <path d="M {ax:.1f},{ay:.1f} A 82 82 0 1 1 {bx:.1f},{by:.1f}" fill="none" stroke="url(#arc)" stroke-width="9" stroke-linecap="round" opacity="0.55" filter="url(#glow)"/>
-  <path d="M {ax:.1f},{ay:.1f} A 82 82 0 1 1 {bx:.1f},{by:.1f}" fill="none" stroke="url(#arc)" stroke-width="7" stroke-linecap="round"/>
-
-  <!-- Knob -->
-  <circle cx="{cx}" cy="{cy}" r="60" fill="url(#cap)" filter="url(#knobshadow)"/>
-  <circle cx="{cx}" cy="{cy}" r="60" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.5"/>
-  <line x1="{px1:.1f}" y1="{py1:.1f}" x2="{px2:.1f}" y2="{py2:.1f}" stroke="#2b1d26" stroke-width="9" stroke-linecap="round"/>
-
-  <!-- Glass pill: amp status LEDs -->
-  <rect x="186" y="345" width="140" height="24" rx="12" fill="#000000" fill-opacity="0.5" stroke="#ffffff" stroke-opacity="0.15"/>
-  <circle cx="204" cy="357" r="4" fill="#22c55e"/>
-  <circle cx="308" cy="357" r="4" fill="#f5b942"/>
+  <path d="{tile}" fill="url(#bg)" filter="url(#drop)"/>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+    <g filter="url(#lift)" transform="translate(512 528) rotate(-8) scale(1.2) translate(-512 -512)">
+      <!-- pick thickness, then the face slightly above it -->
+      <path d="{pick}" fill="url(#edge)" transform="translate(0 14)"/>
+      <path d="{pick}" fill="url(#face)"/>
+      <!-- pressed-in wave: dark groove with a light lower lip -->
+      <path d="{wave}" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="50" stroke-linecap="round" transform="translate(0 6)"/>
+      <path d="{wave}" fill="none" stroke="#c9562a" stroke-width="46" stroke-linecap="round"/>
+      <path d="{wave}" fill="none" stroke="#7e2b12" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round" transform="translate(0 -12)"/>
+      <!-- top gloss -->
+      <g clip-path="url(#pickclip)">
+        <ellipse cx="470" cy="300" rx="230" ry="70" fill="url(#gloss)" opacity="0.7"/>
+      </g>
+      <path d="{pick}" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="4"/>
+    </g>
+    <path d="M100,100 H924 V560 Q512,470 100,560 Z" fill="url(#sheen)"/>
+  </g>
+  <path d="{tile}" fill="none" stroke="url(#rim)" stroke-width="5"/>
 </svg>
 '''
-out = pathlib.Path(__file__).resolve().parent.parent / "packaging" / "haze.svg"
+
+out = root / "packaging/haze.svg"
 out.write_text(svg)
-print(out)
+
+def render(size, dest):
+    subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size), str(out), "-o", str(dest)], check=True)
+
+for s in (32, 48, 64, 128, 256, 512):
+    render(s, root / f"packaging/haze-{s}.png")
+render(128, root / "crates/katana-studio/ui/art/icon.png")
+print("wrote", out)
