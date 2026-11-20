@@ -252,7 +252,8 @@ export component PedalView inherits Rectangle {
                 horizontal-alignment: center;
                 overflow: elide;
                 color: p.is-amp ? T.accent-ink : root.ink-2;
-                font-size: 9px;
+                font-family: T.display;
+                font-size: 10.5px;
                 font-weight: 600;
             }
         }
@@ -273,8 +274,9 @@ export component PedalView inherits Rectangle {
                 horizontal-alignment: center;
                 overflow: elide;
                 color: p.ink;
-                font-size: 13px;
-                font-weight: 800;
+                font-family: T.display;
+                font-size: 15.5px;
+                font-weight: 700;
             }
             Text {
                 x: 6px;
@@ -284,8 +286,9 @@ export component PedalView inherits Rectangle {
                 horizontal-alignment: center;
                 overflow: elide;
                 color: root.ink-2;
-                font-size: 10px;
-                font-weight: 600;
+                font-family: T.display;
+                font-size: 11.5px;
+                font-weight: 500;
             }
             // footswitch: nut ring + domed metal cap
             Rectangle {
@@ -324,8 +327,9 @@ export component PedalView inherits Rectangle {
                 text: p.title;
                 horizontal-alignment: center;
                 color: T.accent-ink;
-                font-size: 12px;
-                font-weight: 800;
+                font-family: T.display;
+                font-size: 14px;
+                font-weight: 700;
                 letter-spacing: 1.5px;
             }
             Text {
@@ -339,7 +343,8 @@ export component PedalView inherits Rectangle {
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 color: #D8DBE0;
-                font-size: 10.5px;
+                font-family: T.display;
+                font-size: 12px;
                 font-weight: 600;
             }
             Rectangle {
@@ -440,18 +445,46 @@ export component PedalView inherits Rectangle {
 // ---------------------------------------------------------------- signal chain
 
 /// IN / OUT terminal of the chain.
+/// IN / OUT terminal: a round badge on the cable line (guitar in, speaker cabinet out) with its
+/// label underneath. The badge centre sits 20px below the top so the cable meets it in the middle.
 export component ChainNode inherits Rectangle {
     in property <string> text;
     in property <bool> hot;
+    in property <bool> out;
     width: 40px;
-    height: 26px;
-    border-radius: 13px;
-    background: T.panel-hi;
+    height: 58px;
+    Rectangle {
+        y: 0;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: @radial-gradient(circle, T.panel-hi 0%, T.panel 100%);
+        border-width: 1.5px;
+        border-color: hot ? T.accent : T.line-hi;
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: hot ? T.accent-hi : T.text-2;
+            stroke-width: 1.5px;
+            fill: transparent;
+            commands: out
+                // speaker cabinet: box, cone, dust cap, logo strip
+                ? "M5.5 3 L18.5 3 A2.5 2.5 0 0 1 21 5.5 L21 18.5 A2.5 2.5 0 0 1 18.5 21 L5.5 21 A2.5 2.5 0 0 1 3 18.5 L3 5.5 A2.5 2.5 0 0 1 5.5 3 Z M12 9 A4.75 4.75 0 1 0 12 18.5 A4.75 4.75 0 1 0 12 9 Z M12 12.3 A1.45 1.45 0 1 0 12 15.2 A1.45 1.45 0 1 0 12 12.3 Z M9 6 L15 6"
+                // electric guitar: body, neck, headstock, pickups
+                : "M13.2 10.8 L19.6 4.4 M18.2 2.6 L21.4 5.8 M11.4 9.2 C9.9 7.9 7.6 8.4 7 10.1 C6.6 11.2 5.4 11.4 4.4 12.1 C2.5 13.6 2.8 17.1 5 19.1 C7.1 21.2 10.4 21.5 11.9 19.6 C12.6 18.6 12.8 17.4 13.9 17 C15.6 16.4 16.1 14.1 14.8 12.6 Z M7.6 14.4 L9.6 16.4 M9.4 12.6 L11.4 14.6";
+        }
+    }
     Text {
+        y: 43px;
         text: root.text;
-        color: hot ? T.accent-hi : T.text-2;
-        font-weight: 600;
-        font-size: 11px;
+        horizontal-alignment: center;
+        color: hot ? T.accent-hi : T.text-3;
+        font-family: T.mono;
+        font-weight: 700;
+        font-size: 9.5px;
+        letter-spacing: 1px;
     }
 }
 

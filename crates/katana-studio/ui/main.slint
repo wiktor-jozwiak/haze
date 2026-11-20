@@ -1,3 +1,10 @@
+import "fonts/AdwaitaSans-Regular.ttf";
+import "fonts/BarlowSemiCondensed-Medium.ttf";
+import "fonts/BarlowSemiCondensed-SemiBold.ttf";
+import "fonts/BarlowSemiCondensed-Bold.ttf";
+import "fonts/JetBrainsMono-Regular.ttf";
+import "fonts/JetBrainsMono-SemiBold.ttf";
+import "fonts/JetBrainsMono-Bold.ttf";
 import { ListView } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { Label, Btn, Led, Toggle, Icon, Icons } from "widgets.slint";
@@ -286,7 +293,8 @@ export component MainWindow inherits Window {
                     Text {
                         text: "Haze";
                         color: T.text;
-                        font-size: 15px;
+                        font-family: T.display;
+                        font-size: 19px;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -627,7 +635,7 @@ export component MainWindow inherits Window {
                                     text: ed-name;
                                     color: T.text;
                                     font-family: T.display;
-                                    font-size: 24px;
+                                    font-size: 28px;
                                     font-weight: 700;
                                     single-line: true;
                                     accepted => {
@@ -864,14 +872,15 @@ export component MainWindow inherits Window {
                         property <length> wy: py + jack-y;
                         ChainNode {
                             x: 4px;
-                            y: board.wy - 13px;
+                            y: board.wy - 20px;
                             text: "IN";
                             hot: ed-live;
                         }
                         ChainNode {
                             x: board.width - 44px;
-                            y: board.wy - 13px;
+                            y: board.wy - 20px;
                             text: "OUT";
+                            out: true;
                             hot: ed-live;
                         }
                         if pedals.length > 0: Wire {

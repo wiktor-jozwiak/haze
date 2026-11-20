@@ -244,7 +244,7 @@ pub fn group_of(d: &ParamDef) -> String {
     }
 }
 
-/// Short label under a pedal knob (fits ~30px at 9px).
+/// Short label under a pedal knob (fits ~30px at 10.5px Barlow Semi Condensed).
 pub fn short(name: &str) -> String {
     match name {
         "EFFECT LEVEL" | "LEVEL" => "Level".into(),
@@ -259,6 +259,8 @@ pub fn short(name: &str) -> String {
         "ATTACK" => "Attack".into(),
         "FEEDBACK" => "Fdbk".into(),
         "FREQUENCY" => "Freq".into(),
+        "RESONANCE" => "Reso".into(),
+        "SENSITIVITY" => "Sens".into(),
         "RELEASE" => "Release".into(),
         "PRE DELAY" => "Pre".into(),
         "LOW GAIN" => "Low".into(),
@@ -269,6 +271,9 @@ pub fn short(name: &str) -> String {
         other => {
             // multi-word names: the last word carries the meaning ("PEDAL MIN" → "Min")
             let w = other.split([' ', '_']).filter(|w| !w.is_empty()).last().unwrap_or(other);
+            if w != other {
+                return short(w); // "CHORUS FREQUENCY" → "Freq", not "Frequen"
+            }
             let mut c = w.chars();
             match c.next() {
                 Some(f) => f.to_uppercase().chain(c.flat_map(|x| x.to_lowercase())).take(7).collect(),
@@ -284,6 +289,14 @@ pub const STATUS: usize = blk::STATUS;
 mod tests {
     use super::*;
     use katana_core::Patch;
+
+    #[test]
+    fn knob_labels_use_the_meaningful_word() {
+        assert_eq!(short("FREQUENCY"), "Freq");
+        assert_eq!(short("CHORUS FREQUENCY"), "Freq");
+        assert_eq!(short("PEDAL MIN"), "Min");
+        assert_eq!(short("DELAY TIME"), "Time");
+    }
 
     fn names(p: &Panel, patch: &Patch) -> Vec<&'static str> {
         let d = p.node(Node::Eq);

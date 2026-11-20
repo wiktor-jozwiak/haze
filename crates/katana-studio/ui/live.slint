@@ -1,6 +1,7 @@
 import { T } from "theme.slint";
 import { Icon, Icons } from "widgets.slint";
 import { ToneRow, FxSig } from "library.slint";
+import { AmpBadge, Drive } from "art.slint";
 
 component BigStep inherits Rectangle {
     in property <string> icon;
@@ -128,11 +129,35 @@ export component LiveView inherits Rectangle {
         }
         HorizontalLayout {
             alignment: center;
-            height: 40px;
-            if root.has: FxSig {
-                h: 40px;
-                labels: true;
-                leds: tones[selected-index].leds;
+            height: 52px;
+            spacing: 22px;
+            if root.has: VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                HorizontalLayout {
+                    alignment: center;
+                    AmpBadge {
+                        width: 52px;
+                        meter: false;
+                        drive: tones[selected-index].drive;
+                    }
+                }
+                Text {
+                    text: Drive.names[tones[selected-index].drive];
+                    horizontal-alignment: center;
+                    color: T.drive(tones[selected-index].drive);
+                    font-family: T.display;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+            }
+            if root.has: VerticalLayout {
+                alignment: center;
+                FxSig {
+                    h: 40px;
+                    labels: true;
+                    leds: tones[selected-index].leds;
+                }
             }
         }
         Rectangle { height: 8px; }
@@ -199,7 +224,8 @@ export component LiveView inherits Rectangle {
             horizontal-stretch: 1;
             text: root.has-next ? tones[selected-index + 1].name : "End of list";
             color: root.has-next ? T.text : T.text-3;
-            font-size: 30px;
+            font-family: T.display;
+            font-size: 34px;
             font-weight: 700;
             overflow: elide;
             vertical-alignment: center;

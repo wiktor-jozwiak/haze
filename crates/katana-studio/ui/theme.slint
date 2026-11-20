@@ -37,7 +37,8 @@ export global T {
     out property <color> led-yellow: #FFC23A;
     out property <color> danger: #FF4D5E;
 
-    out property <string> display: "Adwaita Sans";
+    // all three faces ship inside the binary (fonts/, imported in main.slint): same look on every system
+    out property <string> display: "Barlow Semi Condensed";
     out property <string> mono: "JetBrains Mono";
     out property <length> r: 8px;
     out property <length> r-card: 12px;
@@ -49,6 +50,16 @@ export global T {
         if i == 2 { return #A070FF; }
         if i == 3 { return #2FD69A; }
         return #3FC8E0;
+    }
+
+    /// amp drive scale: 0 acoustic, 1 clean, 2 pushed, 3 crunch, 4 lead, 5 high gain
+    public pure function drive(d: int) -> color {
+        if d <= 0 { return #C89B6A; }
+        if d == 1 { return #6FB7FF; }
+        if d == 2 { return #4FD1A5; }
+        if d == 3 { return #FFC23A; }
+        if d == 4 { return #FF8A3D; }
+        return #FF4D5E;
     }
 
     public pure function led(state: int) -> color {

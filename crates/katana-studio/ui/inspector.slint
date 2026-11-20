@@ -181,18 +181,42 @@ component SegBtn inherits Rectangle {
     in property <string> hint;
     in property <color> accent: T.accent;
     in property <bool> stretch: true;
+    /// drive bars (0..5) left of the label, -1 none
+    in property <int> bars: -1;
     callback clicked;
-    min-width: t.preferred-width + 24px;
+    min-width: t.preferred-width + 24px + (bars >= 0 ? 26px : 0);
     horizontal-stretch: stretch ? 1 : 0;
     height: 30px;
     border-radius: 6px;
     background: active ? accent : ta.has-hover && enabled ? T.hover : transparent;
     animate background { duration: 100ms; }
-    t := Text {
-        text: root.text;
-        color: active ? T.accent-ink : enabled ? (ta.has-hover ? T.text : T.text-2) : T.text-off;
-        font-size: 12.5px;
-        font-weight: active ? 700 : 500;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 7px;
+        if root.bars >= 0: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 19px;
+                height: 12px;
+                for i in 5: Rectangle {
+                    x: i * 4px;
+                    y: parent.height - self.height;
+                    width: 3px;
+                    height: 4px + i * 2px;
+                    border-radius: 1px;
+                    background: i < root.bars
+                        ? (root.active ? T.accent-ink : root.enabled ? T.drive(root.bars) : T.text-off)
+                        : (root.active ? T.accent-ink.with-alpha(0.22) : #353943);
+                }
+            }
+        }
+        t := Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: active ? T.accent-ink : enabled ? (ta.has-hover ? T.text : T.text-2) : T.text-off;
+            font-size: 12.5px;
+            font-weight: active ? 700 : 500;
+        }
     }
     ta := TouchArea {
         mouse-cursor: root.enabled ? pointer : not-allowed;
@@ -228,9 +252,9 @@ component AmpTypeBand inherits Rectangle {
     callback dsp-voicing-picked(int);
 
     // label, Katana family index (-1 = PC DSP engine only), PC engine voicing index
-    property <[{n: string, f: int, d: int}]> types: [
-        { n: "Acoustic", f: 0, d: 0 }, { n: "Clean", f: 1, d: 1 }, { n: "Pushed", f: -1, d: 2 }, { n: "Crunch", f: 2, d: 3 },
-        { n: "Lead", f: 3, d: 4 }, { n: "Brown", f: 4, d: 5 }, { n: "Modern", f: -1, d: 6 },
+    property <[{n: string, f: int, d: int, g: int}]> types: [
+        { n: "Acoustic", f: 0, d: 0, g: 0 }, { n: "Clean", f: 1, d: 1, g: 1 }, { n: "Pushed", f: -1, d: 2, g: 2 }, { n: "Crunch", f: 2, d: 3, g: 3 },
+        { n: "Lead", f: 3, d: 4, g: 4 }, { n: "Brown", f: 4, d: 5, g: 5 }, { n: "Modern", f: -1, d: 6, g: 5 },
     ];
 
     HorizontalLayout {
@@ -242,6 +266,7 @@ component AmpTypeBand inherits Rectangle {
             SegGroup {
                 for v in types: SegBtn {
                     text: v.n;
+                    bars: v.g;
                     accent: root.accent;
                     active: dsp-voicing >= 0 ? v.d == dsp-voicing : v.f >= 0 && v.f == family;
                     enabled: v.f >= 0 || !T.hw;
@@ -371,7 +396,8 @@ export component Inspector inherits Rectangle {
         Text {
             text: root.title;
             color: T.text;
-            font-size: 18px;
+            font-family: T.display;
+            font-size: 21px;
             font-weight: 700;
             vertical-alignment: center;
         }

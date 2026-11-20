@@ -229,3 +229,90 @@ export component EmptyState inherits VerticalLayout {
         @children
     }
 }
+
+/// Drive scale names, index = `T.drive` level.
+export global Drive {
+    out property <[string]> names: ["Acoustic", "Clean", "Pushed", "Crunch", "Lead", "High gain"];
+}
+
+/// Five segments filling up with the amp's drive: 0 acoustic (none lit) to 5 high gain.
+export component DriveMeter inherits Rectangle {
+    in property <int> drive;
+    height: 4px;
+    for i in 5: Rectangle {
+        x: i * (root.width + 2px) / 5;
+        width: (root.width + 2px) / 5 - 2px;
+        height: root.height;
+        border-radius: root.height / 2;
+        background: i < root.drive ? T.drive(i + 1) : #2A2D35;
+    }
+}
+
+/// Little amp head: faceplate in the colour of its voicing, slatted grille, handle, and an
+/// optional drive meter underneath. Tells clean from high gain before reading any text.
+export component AmpBadge inherits Rectangle {
+    in property <int> drive;
+    in property <bool> meter: true;
+    property <length> w: self.width;
+    property <length> h: self.width * 0.7;
+    width: 46px;
+    height: h + (meter ? 8px : 0);
+    // handle
+    Rectangle {
+        x: w * 0.33;
+        y: -w * 0.05;
+        width: w * 0.34;
+        height: w * 0.1;
+        border-radius: w * 0.04;
+        background: #3A3E47;
+    }
+    // tolex shell
+    Rectangle {
+        y: 0;
+        width: w;
+        height: h;
+        border-radius: w * 0.11;
+        background: #1D1F25;
+        border-width: 1px;
+        border-color: #3A3E47;
+        drop-shadow-blur: 6px;
+        drop-shadow-offset-y: 2px;
+        drop-shadow-color: #00000066;
+        // faceplate with knobs
+        Rectangle {
+            x: w * 0.08;
+            y: h * 0.1;
+            width: w * 0.84;
+            height: h * 0.32;
+            border-radius: w * 0.05;
+            background: @linear-gradient(180deg, T.drive(root.drive).brighter(0.2) 0%, T.drive(root.drive) 100%);
+            for k in 4: Rectangle {
+                x: parent.width * (0.18 + k * 0.21) - self.width / 2;
+                width: parent.height * 0.42;
+                height: self.width;
+                border-radius: self.width / 2;
+                background: #15161A;
+            }
+        }
+        // grille slats
+        Rectangle {
+            x: w * 0.08;
+            y: h * 0.5;
+            width: w * 0.84;
+            height: h * 0.38;
+            border-radius: w * 0.04;
+            background: #2B2E35;
+            clip: true;
+            for s in 3: Rectangle {
+                y: parent.height * (0.2 + s * 0.27);
+                height: 1px;
+                background: #3D414A;
+            }
+        }
+    }
+    if meter: DriveMeter {
+        y: h + 4px;
+        width: w;
+        drive: root.drive;
+    }
+}

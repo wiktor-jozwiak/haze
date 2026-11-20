@@ -5,8 +5,8 @@
 //! compares with the goldens in `<dir>`. A view fails when more than 0.2 % of its pixels differ by
 //! more than 32 levels in any channel. `--update` rewrites the goldens.
 //!
-//! Goldens depend on the fonts installed (Adwaita Sans, mono font): regenerate them on a machine
-//! with a different font set instead of trusting a red result.
+//! The UI fonts ship inside the binary (`ui/fonts`), so goldens only depend on the system for
+//! fallback glyphs the bundled faces lack.
 
 use crate::panel::Panel;
 use crate::templates::TEMPLATES;

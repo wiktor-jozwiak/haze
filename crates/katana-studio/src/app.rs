@@ -385,6 +385,7 @@ impl App {
             fav: t.favorite,
             live: self.live.as_deref() == Some(id),
             leds: ModelRc::new(VecModel::from(sm.leds.iter().map(|l| led_i(*l)).collect::<Vec<_>>())),
+            drive: drive_level(&sm.amp),
         })
     }
 
@@ -1680,6 +1681,27 @@ fn ink_for(hue: slint::Color) -> slint::Color {
     }
 }
 
+/// How much gain an amp model implies, 0 acoustic .. 5 high gain, for the amp badge.
+fn drive_level(amp: &str) -> i32 {
+    let a = amp.to_uppercase();
+    let has = |k: &[&str]| k.iter().any(|w| a.contains(w));
+    if has(&["BROWN", "HIGAIN", "EXTREME", "METAL", "MODERN"]) {
+        5
+    } else if has(&["LEAD", "POWER DRIVE", "VINTAGE", "CUSTOM"]) {
+        4
+    } else if has(&["CRUNCH", "MS1959"]) {
+        3
+    } else if has(&["DRIVE", "PUSHED"]) {
+        2
+    } else if has(&["CLEAN"]) {
+        1
+    } else if has(&["ACOUSTIC"]) {
+        0
+    } else {
+        3
+    }
+}
+
 fn nice(name: &str) -> String {
     name.split(' ')
         .map(|w| {
@@ -2367,4 +2389,20 @@ fn watch_library(root: &std::path::Path) {
         }
         libc::close(fd);
     });
+}
+
+#[cfg(test)]
+mod drive_tests {
+    #[test]
+    fn amp_models_land_on_the_drive_scale() {
+        let d = super::drive_level;
+        assert_eq!(d("ACOUSTIC"), 0);
+        assert_eq!(d("CLEAN VARIATION"), 1);
+        assert_eq!(d("VO DRIVE"), 2);
+        assert_eq!(d("CRUNCH"), 3);
+        assert_eq!(d("LEAD"), 4);
+        assert_eq!(d("POWER DRIVE"), 4);
+        assert_eq!(d("BROWN VARIATION"), 5);
+        assert_eq!(d("R-FIER MODERN"), 5);
+    }
 }
