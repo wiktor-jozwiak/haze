@@ -113,11 +113,24 @@ impl Tone {
     }
 }
 
+/// `$HOME`, or `%USERPROFILE%` on Windows (where HOME is usually unset).
+pub fn home_dir() -> PathBuf {
+    let v = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    #[cfg(windows)]
+    let v = v.or_else(|| std::env::var_os("USERPROFILE"));
+    PathBuf::from(v.unwrap_or_default())
+}
+
 impl Library {
+    /// `$XDG_DATA_HOME/katana-studio` (`~/.local/share/…`); `%APPDATA%\katana-studio` on Windows.
     pub fn default_root() -> PathBuf {
+        #[cfg(windows)]
+        if let Some(d) = std::env::var_os("APPDATA") {
+            return PathBuf::from(d).join("katana-studio");
+        }
         let base = std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
+            .unwrap_or_else(|| home_dir().join(".local/share"));
         base.join("katana-studio")
     }
 

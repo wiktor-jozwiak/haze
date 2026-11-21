@@ -12,6 +12,9 @@
 //! `haze --png out.png [--tab N] [--hover X,Y] [--size WxH]`  render one frame offscreen (CPU renderer) for visual checks
 //! `haze snapshot-check <dir> [--update]`  render the fixed views against a fixture library, compare with goldens
 
+// Windows: a GUI exe opens no console window; CLI subcommands attach to the caller's console.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod app;
 mod check;
 mod panel;
@@ -29,8 +32,24 @@ use katana_core::Library;
 slint::include_modules!();
 
 fn main() {
+/// GUI-subsystem exe started from cmd/PowerShell: print into that console. Skipped when the
+/// parent already gave us handles (pipes from `snapshot-check`, redirects).
+#[cfg(windows)]
+fn attach_console() {
+    use windows_sys::Win32::System::Console::{AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_OUTPUT_HANDLE};
+    unsafe {
+        if GetStdHandle(STD_OUTPUT_HANDLE).is_null() {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let root = std::env::var_os("KATANA_STUDIO_LIBRARY").map(Into::into).unwrap_or_else(Library::default_root);
+    #[cfg(windows)]
+    if !args.is_empty() {
+        attach_console();
+    }
     let mut lib = match Library::open(&root) {
         Ok(l) => l,
         Err(e) => {
@@ -48,7 +67,11 @@ fn main() {
         Some("import-windows") => {
             let dirs = app::find_bts_dirs();
             if dirs.is_empty() {
-                eprintln!("Nie znaleziono BOSS Tone Studio na zamontowanych partycjach (/mnt, /media, /run/media).");
+                if cfg!(windows) {
+                    eprintln!("Nie znaleziono biblioteki BOSS Tone Studio w %LOCALAPPDATA%\\Roland.");
+                } else {
+                    eprintln!("Nie znaleziono BOSS Tone Studio na zamontowanych partycjach (/mnt, /media, /run/media).");
+                }
                 std::process::exit(2);
             }
             for d in dirs {

@@ -4,7 +4,7 @@
 
 # Haze
 
-**A tone editor, librarian and practice rig for the BOSS KATANA MkII on Linux, written in Rust and drawn on the CPU.**
+**A tone editor, librarian and practice rig for the BOSS KATANA MkII on Linux and Windows, written in Rust and drawn on the CPU.**
 
 [![Release](https://img.shields.io/github/v/release/wiktor-jozwiak/haze?style=flat-square&color=e8703a&include_prereleases)](https://github.com/wiktor-jozwiak/haze/releases)
 [![Stars](https://img.shields.io/github/stars/wiktor-jozwiak/haze?style=flat-square&color=e2a03f)](https://github.com/wiktor-jozwiak/haze/stargazers)
@@ -25,12 +25,12 @@
 </table>
 
 **[Tour](#tour) · [What you get](#what-you-get) · [Why it is light](#why-it-is-light) ·
-[Install](#install) · [Real numbers wanted](#real-numbers-wanted) · [Develop](#develop)**
+[Download](#download) · [Real numbers wanted](#real-numbers-wanted) · [Develop](#develop)**
 
 </div>
 
 Haze talks to the amp the way BOSS Tone Studio does, over USB MIDI and SysEx, and adds what Tone Studio
-never had on Linux: a library you can search, setlists, a stage view, and a practice room with drums,
+never had: a Linux version, a library you can search, setlists, a stage view, and a practice room with drums,
 a looper and a speed trainer. When the amp is not plugged in, the same rig runs on the computer through
 any audio interface.
 
@@ -43,6 +43,8 @@ any audio interface.
 > Haze is one person's daily amp editor (Arch / CachyOS, a KATANA MkII, a cheap USB interface). It is
 > shared because it works, not because it is finished: expect rough edges, and expect to read some code.
 > The command line still speaks Polish; the window speaks English.
+> The Windows build is new: it is built and smoke-tested in CI on every push, but has far fewer
+> hours with a real amp than the Linux one. Reports welcome.
 
 ## Tour
 
@@ -123,9 +125,30 @@ How the numbers above were taken (Ryzen 7 5700X, 48 kHz, release build):
 
 </details>
 
-## Install
+## Download
 
-Linux only. You need Rust (stable), the ALSA headers and a desktop with Wayland or X11.
+| | Get | Then |
+|---|---|---|
+| **Windows 10 / 11** | [haze-windows-x86_64.zip](https://github.com/wiktor-jozwiak/haze/releases/latest/download/haze-windows-x86_64.zip) | unzip, run `haze.exe` |
+| **Linux x86_64** | [haze-linux-x86_64.tar.gz](https://github.com/wiktor-jozwiak/haze/releases/latest/download/haze-linux-x86_64.tar.gz) | unpack, run `./install.sh` |
+
+**Windows:** install the [BOSS KATANA MkII driver](https://www.boss.info/global/support/by_product/katana_mkii/updates_drivers/)
+first (the one Tone Studio uses) and close Tone Studio while Haze runs: only one program can hold the
+amp's MIDI port. The exe is portable and not code-signed, so SmartScreen asks once (*More info → Run anyway*).
+The library lives in `%APPDATA%\katana-studio`, and your Tone Studio library is found automatically.
+
+**Linux:** any glibc 2.35+ distro (Ubuntu 22.04, Debian 12, Fedora 36, Arch) with ALSA and fontconfig,
+Wayland or X11. `install.sh` puts `haze` in `~/.local/bin` with its icon and menu entry, no root:
+
+```sh
+tar xzf haze-linux-x86_64.tar.gz && haze-linux-x86_64/install.sh
+```
+
+Every release lists `SHA256SUMS` next to the files. All builds: [Releases](https://github.com/wiktor-jozwiak/haze/releases).
+
+### Build from source
+
+You need Rust (stable). On Linux also the ALSA headers.
 
 ```sh
 # Arch / CachyOS
@@ -147,7 +170,7 @@ From the command line:
 
 ```sh
 haze import ~/Downloads/my-tones.tsl   # a .tsl file or a Tone Studio folder
-haze import-windows                     # find Tone Studio on a mounted Windows partition
+haze import-windows                     # find Tone Studio (on Linux: on a mounted Windows partition)
 haze list                               # every tone in the library
 haze probe "80s Lead"                   # hardware check: connect, audition, read back
 ```
@@ -184,8 +207,9 @@ Useful variables: `KATANA_STUDIO_LIBRARY` (another library folder), `HAZE_PAGE` 
 | `crates/haze-dsp` | the PC engine: amp, cab, effects, tuner, drums, looper; realtime-safe |
 | `crates/katana-studio` | the `haze` app: Slint UI, pages, golden screenshot tests |
 | `crates/katana-art` | generated textures for the hardware look |
-| `vendor/cpal` | cpal 0.15.3 with a fix for ALSA capture after an overrun |
-| `packaging/` | icon, desktop entry, `install.sh` |
+| `vendor/cpal` | cpal 0.15.3 with a fix for ALSA capture after an overrun and WASAPI rate conversion |
+| `packaging/` | icon, desktop entry, `install.sh`, Windows `.ico` and readme |
+| `.github/workflows/build.yml` | tests, Linux + Windows builds; a `v*` tag publishes the release |
 
 ## Credits
 

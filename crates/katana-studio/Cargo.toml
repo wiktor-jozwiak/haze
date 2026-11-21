@@ -1,6 +1,6 @@
 [package]
 name = "katana-studio"
-description = "Haze: tone librarian & editor for BOSS KATANA MkII on Linux"
+description = "Haze: tone librarian & editor for BOSS KATANA MkII on Linux and Windows"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,14 +10,21 @@ name = "haze"
 path = "src/main.rs"
 
 [dependencies]
-haze-dsp = { version = "0.1.0", path = "../haze-dsp" }
+haze-dsp = { version = "0.2.0", path = "../haze-dsp" }
 katana-core = { path = "../katana-core" }
 katana-midi = { path = "../katana-midi" }
-libc = "0.2"
 # already in the tree via slint; golden PNGs of `haze snapshot-check`
 png = "0.18"
 # CPU software renderer only: no GL/Vulkan context, partial redraws, small RSS.
 slint = { version = "1.19", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
 [build-dependencies]
 slint-build = "1.19"
+# exe icon + version info on Windows (build script only; nothing at run time)
+winresource = "0.1"

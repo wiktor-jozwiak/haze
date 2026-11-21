@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "haze-dsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cpal",
  "hound",
@@ -2280,14 +2280,14 @@ dependencies = [
 
 [[package]]
 name = "katana-art"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "png 0.17.16",
 ]
 
 [[package]]
 name = "katana-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2295,16 +2295,17 @@ dependencies = [
 
 [[package]]
 name = "katana-midi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "katana-core",
  "libc",
  "midir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "katana-studio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "haze-dsp",
  "katana-core",
@@ -2313,6 +2314,8 @@ dependencies = [
  "png 0.18.1",
  "slint",
  "slint-build",
+ "windows-sys 0.61.2",
+ "winresource",
 ]
 
 [[package]]
@@ -5651,6 +5654,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
+dependencies = [
+ "toml",
+ "version_check",
 ]
 
 [[package]]

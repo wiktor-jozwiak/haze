@@ -1,6 +1,6 @@
 //! KATANA MkII device actor.
 //!
-//! One thread owns the ALSA ports. The UI sends [`Cmd`]s, the actor emits [`Event`]s through
+//! One thread owns the MIDI ports (ALSA on Linux, WinMM on Windows). The UI sends [`Cmd`]s, the actor emits [`Event`]s through
 //! a callback. Incoming MIDI arrives on the same channel as commands, so the thread sleeps
 //! in `recv()` when idle — no polling, no timers.
 
@@ -358,6 +358,7 @@ impl Actor {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// Hotplug without polling: inotify on /dev/snd wakes this thread only when a `midiC*` node is
 /// created or removed; after a short settle delay (ALSA sequencer client setup) the actor
 /// re-scans. Silently does nothing if inotify is unavailable.
@@ -398,3 +399,56 @@ fn watch_hotplug(tx: Sender<Msg>) {
         libc::close(fd);
     });
 }
+
+/// Hotplug without polling on Windows: Configuration Manager calls back on its own thread
+/// pool when a USB device interface arrives or leaves (no window, no message loop). One plug
+/// fires several interfaces, and WinMM lists the MIDI port only once the driver has loaded,
+/// so events are coalesced and the actor re-scans 1.5 s after the last one.
+#[cfg(windows)]
+fn watch_hotplug(tx: Sender<Msg>) {
+    use std::ffi::c_void;
+    use windows_sys::core::GUID;
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::*;
+    // GUID_DEVINTERFACE_USB_DEVICE: any USB device, whichever driver (BOSS or class) the amp uses
+    const USB_DEVICE: GUID = GUID::from_u128(0xA5DCBF10_6530_11D2_901F_00C04FB951ED);
+
+    unsafe extern "system" fn on_change(
+        _h: HCMNOTIFICATION,
+        ctx: *const c_void,
+        action: CM_NOTIFY_ACTION,
+        _data: *const CM_NOTIFY_EVENT_DATA,
+        _size: u32,
+    ) -> u32 {
+        if action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL || action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL {
+            let _ = (*(ctx as *const Sender<()>)).send(());
+        }
+        0
+    }
+
+    let (ev_tx, ev_rx) = channel::<()>();
+    let ctx = Box::into_raw(Box::new(ev_tx));
+    let ok = unsafe {
+        let mut filter: CM_NOTIFY_FILTER = std::mem::zeroed();
+        filter.cbSize = std::mem::size_of::<CM_NOTIFY_FILTER>() as u32;
+        filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
+        filter.u.DeviceInterface.ClassGuid = USB_DEVICE;
+        let mut h: HCMNOTIFICATION = std::mem::zeroed();
+        CM_Register_Notification(&filter, ctx as *const c_void, Some(on_change), &mut h) == CR_SUCCESS
+    };
+    if !ok {
+        drop(unsafe { Box::from_raw(ctx) });
+        return;
+    }
+    // the registration (and `ctx`) live for the rest of the process
+    let _ = thread::Builder::new().name("katana-hotplug".into()).spawn(move || {
+        while ev_rx.recv().is_ok() {
+            while ev_rx.recv_timeout(Duration::from_millis(1500)).is_ok() {}
+            if tx.send(Msg::Cmd(Cmd::Hotplug)).is_err() {
+                break;
+            }
+        }
+    });
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn watch_hotplug(_tx: Sender<Msg>) {}

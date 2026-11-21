@@ -43,6 +43,7 @@ pub struct DeviceInfo {
 }
 
 /// (card number, card id, human name) per line of /proc/asound/cards.
+#[cfg(target_os = "linux")]
 fn card_labels() -> Vec<(u32, String, String)> {
     // " 0 [CODEC          ]: USB-Audio - USB AUDIO  CODEC"
     let txt = std::fs::read_to_string("/proc/asound/cards").unwrap_or_default();
@@ -64,6 +65,7 @@ fn is_mic(label: &str) -> bool {
 
 /// One entry per sound card (`sysdefault:CARD=…`, which converts format/rate) plus the
 /// system default. Outputs skip HDMI-only cards' noise by listing them like the rest.
+#[cfg(target_os = "linux")]
 pub fn list_devices(input: bool) -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     let labels = card_labels();
@@ -110,7 +112,35 @@ pub fn list_devices(input: bool) -> Vec<DeviceInfo> {
     out
 }
 
+/// Windows (WASAPI) and others: every endpoint by its friendly name, e.g.
+/// `Microphone (Realtek(R) Audio)` or `IN (KATANA)`, plus the system default. WASAPI shared
+/// mode resamples (see vendor/cpal/HAZE-PATCH.md), so any rate the engine asks for opens.
+#[cfg(not(target_os = "linux"))]
+pub fn list_devices(input: bool) -> Vec<DeviceInfo> {
+    let host = cpal::default_host();
+    let devs: Vec<String> = match if input { host.input_devices() } else { host.output_devices() } {
+        Ok(it) => it.filter_map(|d| d.name().ok()).collect(),
+        Err(_) => vec![],
+    };
+    let mut out = vec![];
+    if !input {
+        out.push(DeviceInfo { id: "default".into(), label: "systemowe".into(), mic: false, busy: false });
+    }
+    for d in devs {
+        out.push(DeviceInfo { mic: input && is_mic(&d), label: d.clone(), id: d, busy: false });
+    }
+    if input {
+        out.push(DeviceInfo { id: "default".into(), label: "systemowe (zwykle mikrofon!)".into(), mic: true, busy: false });
+    }
+    out
+}
+
 fn find_device(host: &cpal::Host, name: &str, input: bool) -> Option<cpal::Device> {
+    // ALSA has a real PCM called "default"; WASAPI has no such name, only a default endpoint
+    #[cfg(not(target_os = "linux"))]
+    if name == "default" {
+        return if input { host.default_input_device() } else { host.default_output_device() };
+    }
     let mut it: Box<dyn Iterator<Item = cpal::Device>> = if input { Box::new(host.input_devices().ok()?) } else { Box::new(host.output_devices().ok()?) };
     it.find(|d| d.name().is_ok_and(|n| n == name))
 }
@@ -189,7 +219,9 @@ impl Engine {
                     Ok(s) => {
                         got = Some(s);
                         ring_rx = rx;
-                        in_period = size / 4;
+                        // ALSA: period = buffer / 4. WASAPI hands over whole device periods
+                        // (~10 ms) up to the buffer size per callback.
+                        in_period = if cfg!(windows) { size } else { size / 4 };
                         break;
                     }
                     Err(e) => last_err = e,
@@ -272,7 +304,8 @@ fn promote_audio_thread() -> u32 {
             return 4;
         }
     }
-    0
+    // cpal's WASAPI threads already run at THREAD_PRIORITY_TIME_CRITICAL
+    u32::from(cfg!(windows))
 }
 
 fn build_in<T: SizedSample>(

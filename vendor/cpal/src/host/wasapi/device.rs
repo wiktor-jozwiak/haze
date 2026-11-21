@@ -565,7 +565,10 @@ impl Device {
             let buffer_duration =
                 buffer_size_to_duration(&config.buffer_size, config.sample_rate.0);
 
-            let mut stream_flags = Audio::AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+            // haze patch: let the shared-mode engine convert rate/format (Katana USB runs at 44.1 kHz)
+            let mut stream_flags = Audio::AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+                | Audio::AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+                | Audio::AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
 
             if self.data_flow() == Audio::eRender {
                 stream_flags |= Audio::AUDCLNT_STREAMFLAGS_LOOPBACK;
@@ -578,8 +581,8 @@ impl Device {
                 let share_mode = Audio::AUDCLNT_SHAREMODE_SHARED;
 
                 // Ensure the format is supported.
+                // haze patch: a format other than the mix format is fine with AUTOCONVERTPCM
                 match super::device::is_format_supported(&audio_client, &format_attempt.Format) {
-                    Ok(false) => return Err(BuildStreamError::StreamConfigNotSupported),
                     Err(_) => return Err(BuildStreamError::DeviceNotAvailable),
                     _ => (),
                 }
@@ -687,8 +690,8 @@ impl Device {
                 let share_mode = Audio::AUDCLNT_SHAREMODE_SHARED;
 
                 // Ensure the format is supported.
+                // haze patch: a format other than the mix format is fine with AUTOCONVERTPCM
                 match super::device::is_format_supported(&audio_client, &format_attempt.Format) {
-                    Ok(false) => return Err(BuildStreamError::StreamConfigNotSupported),
                     Err(_) => return Err(BuildStreamError::DeviceNotAvailable),
                     _ => (),
                 }
@@ -697,7 +700,10 @@ impl Device {
                 audio_client
                     .Initialize(
                         share_mode,
-                        Audio::AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                        // haze patch: see the input builder
+                        Audio::AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+                            | Audio::AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+                            | Audio::AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
                         buffer_duration,
                         0,
                         &format_attempt.Format,

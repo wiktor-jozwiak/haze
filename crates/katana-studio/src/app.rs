@@ -11,7 +11,7 @@ use katana_core::{Library, SetlistKind};
 use katana_midi::{Cmd, Device, Event};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -371,13 +371,24 @@ fn led_i(l: Led) -> i32 {
 
 fn local_stamp() -> String {
     // "2026-11-17 17:02" in local time, without pulling a date crate
-    let out = std::process::Command::new("date").arg("+%Y-%m-%d %H:%M").output();
-    out.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+    #[cfg(windows)]
+    {
+        let t = unsafe {
+            let mut t = std::mem::zeroed();
+            windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut t);
+            t
+        };
+        format!("{:04}-{:02}-{:02} {:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute)
+    }
+    #[cfg(not(windows))]
+    {
+        let out = std::process::Command::new("date").arg("+%Y-%m-%d %H:%M").output();
+        out.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+    }
 }
 
 pub fn export_dir() -> PathBuf {
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    home.join("Katana")
+    katana_core::library::home_dir().join("Katana")
 }
 
 fn safe_file_name(n: &str) -> String {
@@ -386,7 +397,20 @@ fn safe_file_name(n: &str) -> String {
     if s.is_empty() { "katana".into() } else { s }
 }
 
+const BTS_PREF: &str = "Roland/BOSS TONE STUDIO for KATANA MkII/pref";
+
+/// BOSS Tone Studio library of this Windows user (`%LOCALAPPDATA%\Roland\…\pref`).
+#[cfg(windows)]
+pub fn find_bts_dirs() -> Vec<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(|d| PathBuf::from(d).join(BTS_PREF))
+        .filter(|p| p.join("ID_LIST").exists())
+        .into_iter()
+        .collect()
+}
+
 /// BOSS Tone Studio library dirs on mounted Windows partitions.
+#[cfg(not(windows))]
 pub fn find_bts_dirs() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = vec![];
     for base in ["/mnt", "/media"] {
@@ -396,7 +420,7 @@ pub fn find_bts_dirs() -> Vec<PathBuf> {
         roots.push(PathBuf::from(base));
     }
     if let Some(user) = std::env::var_os("USER") {
-        let p = Path::new("/run/media").join(user);
+        let p = std::path::Path::new("/run/media").join(user);
         if let Ok(rd) = std::fs::read_dir(&p) {
             roots.extend(rd.flatten().map(|e| e.path()));
         }
@@ -405,7 +429,7 @@ pub fn find_bts_dirs() -> Vec<PathBuf> {
     for r in roots {
         let Ok(users) = std::fs::read_dir(r.join("Users")) else { continue };
         for u in users.flatten() {
-            let pref = u.path().join("AppData/Local/Roland/BOSS TONE STUDIO for KATANA MkII/pref");
+            let pref = u.path().join("AppData/Local").join(BTS_PREF);
             if pref.join("ID_LIST").exists() {
                 found.push(pref);
             }
@@ -2047,7 +2071,9 @@ impl App {
 
     fn refresh_import_hint(&self) {
         let dirs = find_bts_dirs();
-        let hint = if dirs.is_empty() {
+        let hint = if dirs.is_empty() && cfg!(windows) {
+            "No BOSS Tone Studio library found in %LOCALAPPDATA%\\Roland. Enter a .tsl file / folder below.".to_string()
+        } else if dirs.is_empty() {
             "No mounted Windows partition with BOSS Tone Studio found. Mount it (e.g. udisksctl mount -b /dev/nvme0n1p3) or enter a .tsl file / folder below.".to_string()
         } else {
             format!(
@@ -2414,9 +2440,10 @@ fn param_text(d: &katana_core::map::ParamDef, v: i16) -> String {
 
 fn shellexpand(p: &str) -> String {
     let p = p.trim_matches(|c| c == '\'' || c == '"');
-    let p = p.strip_prefix("file://").unwrap_or(p);
+    // file:///C:/x on Windows, file:///home/x elsewhere
+    let p = if cfg!(windows) { p.strip_prefix("file:///") } else { None }.or_else(|| p.strip_prefix("file://")).unwrap_or(p);
     if let Some(rest) = p.strip_prefix("~/") {
-        return format!("{}/{}", std::env::var("HOME").unwrap_or_default(), rest);
+        return katana_core::library::home_dir().join(rest).to_string_lossy().into_owned();
     }
     p.to_string()
 }
@@ -2696,7 +2723,7 @@ fn bind(ui: &MainWindow) {
     }));
     ui.on_audio_device_request(|input| with_app(|a| {
         let list: Vec<haze_dsp::DeviceInfo> = haze_dsp::list_devices(input).into_iter().filter(|d| input || d.id != "default").collect();
-        let mut opts = vec![Opt { value: 0, label: s(if input { "— None (DI player only)" } else { "System default (PipeWire)" }) }];
+        let mut opts = vec![Opt { value: 0, label: s(if input { "— None (DI player only)" } else { if cfg!(windows) { "System default" } else { "System default (PipeWire)" } }) }];
         for (i, d) in list.iter().enumerate() {
             let warn = match (d.mic, d.busy) {
                 (true, _) => "   ⚠ microphone",
@@ -3165,6 +3192,7 @@ pub fn shutdown() {
 
 /// inotify on <library>/tones and /setlists; blocks in poll (no CPU while idle), coalesces a
 /// burst of writes into one reload 250 ms after the last event.
+#[cfg(target_os = "linux")]
 fn watch_library(root: &std::path::Path) {
     use std::os::unix::ffi::OsStrExt;
     let dirs: Vec<std::ffi::CString> = ["tones", "setlists"]
@@ -3200,6 +3228,51 @@ fn watch_library(root: &std::path::Path) {
         libc::close(fd);
     });
 }
+
+/// Windows: change notifications on <library>/tones and /setlists; blocks in
+/// WaitForMultipleObjects (no CPU while idle), same 250 ms coalescing as on Linux.
+#[cfg(windows)]
+fn watch_library(root: &std::path::Path) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_FAILED, WAIT_TIMEOUT};
+    use windows_sys::Win32::Storage::FileSystem::*;
+    use windows_sys::Win32::System::Threading::{WaitForMultipleObjects, INFINITE};
+    let dirs: Vec<Vec<u16>> = ["tones", "setlists"]
+        .iter()
+        .map(|d| root.join(d).as_os_str().encode_wide().chain([0]).collect())
+        .collect();
+    let _ = std::thread::Builder::new().name("haze-library-watch".into()).spawn(move || unsafe {
+        let mask = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE;
+        let hs: Vec<HANDLE> = dirs
+            .iter()
+            .map(|d| FindFirstChangeNotificationW(d.as_ptr(), 0, mask))
+            .filter(|h| *h != INVALID_HANDLE_VALUE)
+            .collect();
+        if hs.is_empty() {
+            return;
+        }
+        let rearm = || hs.iter().for_each(|h| { FindNextChangeNotification(*h); });
+        loop {
+            if WaitForMultipleObjects(hs.len() as u32, hs.as_ptr(), 0, INFINITE) == WAIT_FAILED {
+                break;
+            }
+            // re-arm, then keep re-arming until the burst has been quiet for 250 ms
+            loop {
+                rearm();
+                if WaitForMultipleObjects(hs.len() as u32, hs.as_ptr(), 0, 250) == WAIT_TIMEOUT {
+                    break;
+                }
+            }
+            if slint::invoke_from_event_loop(|| with_app(|a| a.reload_library())).is_err() {
+                break;
+            }
+        }
+        hs.iter().for_each(|h| { FindCloseChangeNotification(*h); });
+    });
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn watch_library(_root: &std::path::Path) {}
 
 #[cfg(test)]
 mod drive_tests {
