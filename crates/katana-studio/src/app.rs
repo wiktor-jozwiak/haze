@@ -129,6 +129,11 @@ struct TunerUi {
     /// A4 in Hz
     reference: i32,
     chromatic: bool,
+    /// Neck page: key (pitch class, 0 = C) and index into `neck::SCALES`
+    key: i32,
+    scale: usize,
+    /// MIDI note lit on the neck (to skip unchanged model writes)
+    live: Option<i32>,
     /// strobe phase 0..1
     strobe: f32,
     /// per string: estimates in a row within ±2 cents, and "tuned" once held ~0.5 s
@@ -144,12 +149,14 @@ struct TunerUi {
 
 impl TunerUi {
     fn load(root: &std::path::Path) -> Self {
-        let mut t = TunerUi { tuning: 0, reference: 440, chromatic: false, strobe: 0.0, hold: vec![], tuned: vec![], shown: None, needle: None, drawn: None };
+        let mut t = TunerUi { tuning: 0, reference: 440, chromatic: false, key: 9, scale: 0, live: None, strobe: 0.0, hold: vec![], tuned: vec![], shown: None, needle: None, drawn: None };
         for l in std::fs::read_to_string(root.join("tuner.conf")).unwrap_or_default().lines() {
             match l.split_once('=') {
                 Some(("tuning", v)) => t.tuning = v.parse().ok().filter(|x| *x < haze_dsp::tuner::TUNINGS.len()).unwrap_or(0),
                 Some(("ref", v)) => t.reference = v.parse().ok().filter(|x| (430..=450).contains(x)).unwrap_or(440),
                 Some(("chromatic", v)) => t.chromatic = v == "1",
+                Some(("key", v)) => t.key = v.parse().ok().filter(|x| (0..12).contains(x)).unwrap_or(9),
+                Some(("scale", v)) => t.scale = v.parse().ok().filter(|x| *x < crate::neck::SCALES.len()).unwrap_or(0),
                 _ => {}
             }
         }
@@ -158,7 +165,10 @@ impl TunerUi {
     }
 
     fn save(&self, root: &std::path::Path) {
-        let _ = std::fs::write(root.join("tuner.conf"), format!("tuning={}\nref={}\nchromatic={}\n", self.tuning, self.reference, self.chromatic as i32));
+        let _ = std::fs::write(
+            root.join("tuner.conf"),
+            format!("tuning={}\nref={}\nchromatic={}\nkey={}\nscale={}\n", self.tuning, self.reference, self.chromatic as i32, self.key, self.scale),
+        );
     }
 
     fn reset_strings(&mut self) {
@@ -179,16 +189,57 @@ impl TunerUi {
         ModelRc::new(VecModel::from(rows))
     }
 
-    fn push_settings(&self, ui: &MainWindow) {
+    fn push_settings(&mut self, ui: &MainWindow) {
         ui.set_tuner_tuning_name(s(haze_dsp::tuner::TUNINGS[self.tuning].name));
         ui.set_tuner_reference(self.reference);
         ui.set_tuner_chromatic(self.chromatic);
         ui.set_tuner_strings(self.strings_model());
+        self.push_neck(ui);
+    }
+
+    fn neck_dot(&self, p: &crate::neck::Pos) -> crate::NeckDot {
+        crate::NeckDot {
+            string: p.string as i32,
+            fret: p.fret,
+            degree: p.degree.map_or(-1, |d| d as i32),
+            label: s(haze_dsp::tuner::note_name(p.midi)),
+        }
+    }
+
+    /// Strings, key, scale dots; clears the played note (a fresh estimate puts it back).
+    fn push_neck(&mut self, ui: &MainWindow) {
+        use crate::neck::{scale_positions, SCALES};
+        let t = &haze_dsp::tuner::TUNINGS[self.tuning];
+        let names: Vec<SharedString> = t.strings.iter().map(|&m| s(haze_dsp::tuner::note_name(m))).collect();
+        let dots: Vec<crate::NeckDot> = scale_positions(t.strings, self.key, &SCALES[self.scale]).iter().map(|p| self.neck_dot(p)).collect();
+        ui.set_neck_strings(ModelRc::new(VecModel::from(names)));
+        ui.set_neck_dots(ModelRc::new(VecModel::from(dots)));
+        ui.set_neck_key(self.key);
+        ui.set_neck_scale(s(SCALES[self.scale].name));
+        self.live = None;
+        ui.set_neck_live(ModelRc::default());
+    }
+
+    /// Light every position of `midi` on the neck (None: nothing). Writes only on a change.
+    fn neck_live(&mut self, ui: &MainWindow, midi: Option<i32>) {
+        if self.live == midi {
+            return;
+        }
+        self.live = midi;
+        let rows: Vec<crate::NeckDot> = match midi {
+            Some(m) => crate::neck::note_positions(haze_dsp::tuner::TUNINGS[self.tuning].strings, self.key, &crate::neck::SCALES[self.scale], m)
+                .iter()
+                .map(|p| self.neck_dot(p))
+                .collect(),
+            None => vec![],
+        };
+        ui.set_neck_live(ModelRc::new(VecModel::from(rows)));
     }
 }
 
-/// Push one tuner estimate to the UI. Footer properties always; the page's only while it shows.
-fn tuner_readout(tu: &mut TunerUi, ui: &MainWindow, p: Option<haze_dsp::Pitch>, page: bool) {
+/// Push one tuner estimate to the UI. Footer properties always; the Tuner (4) and Neck (7)
+/// pages' only while they show.
+fn tuner_readout(tu: &mut TunerUi, ui: &MainWindow, p: Option<haze_dsp::Pitch>, page: i32) {
     use haze_dsp::tuner::{nearest_string, TUNINGS};
     let Some(p) = p else {
         if ui.get_tuner_active() {
@@ -196,13 +247,19 @@ fn tuner_readout(tu: &mut TunerUi, ui: &MainWindow, p: Option<haze_dsp::Pitch>, 
         }
         tu.needle = None;
         tu.hold.iter_mut().for_each(|h| *h = 0);
+        if page == 7 {
+            tu.neck_live(ui, None);
+        }
         return;
     };
     ui.set_tuner_active(true);
     ui.set_tuner_note(s(p.note));
     ui.set_tuner_octave(p.octave);
     ui.set_tuner_cents(p.cents);
-    if !page {
+    if page == 7 {
+        tu.neck_live(ui, Some(p.midi));
+    }
+    if page != 4 {
         tu.needle = None;
         return;
     }
@@ -454,7 +511,7 @@ impl App {
         ui.set_audio_rate(audio_cfg.rate as i32);
         ui.set_audio_input(s(input_label(audio_cfg.input.as_deref(), audio_cfg.channel)));
         ui.set_audio_device(s(dev_label(audio_cfg.output.as_deref(), "System default")));
-        let tu = TunerUi::load(lib.root());
+        let mut tu = TunerUi::load(lib.root());
         tu.push_settings(ui);
         let app = App {
             ui: ui.as_weak(),
@@ -1459,13 +1516,14 @@ impl App {
             for x in fresh {
                 t.push(x);
             }
-            let page = ui.get_page() == 4;
+            let shown = ui.get_page();
+            let page = shown == 4;
             // pitch every other frame (15 Hz) is plenty for a tuner
             if self.meter_tick % 2 == 0 {
                 let p = t.estimate();
                 // the played note for the pitch-aware effects (harmonist, intelligent ring mod)
                 self.dsp.set(haze_dsp::P::PitchMidi, p.as_ref().map_or(-1.0, |p| p.midi_f));
-                tuner_readout(&mut self.tu, &ui, p, page);
+                tuner_readout(&mut self.tu, &ui, p, shown);
             }
             // the strobe moves every frame between estimates, only while the page shows it
             if page {
@@ -2454,6 +2512,14 @@ pub fn dsp_params() -> Arc<haze_dsp::Params> {
     APP.with(|a| a.borrow().as_ref().expect("app installed").borrow().dsp.clone())
 }
 
+/// Snapshot fixture: light `midi` on the neck as if the tuner heard it.
+pub(crate) fn fake_neck_note(midi: i32) {
+    with_app(|a| {
+        let ui = a.ui();
+        a.tu.neck_live(&ui, Some(midi));
+    });
+}
+
 fn with_app(f: impl FnOnce(&mut App)) {
     let app = APP.with(|a| a.borrow().clone());
     if let Some(app) = app {
@@ -2873,6 +2939,17 @@ fn bind(ui: &MainWindow) {
         a.tu.save(a.lib.root());
         a.tu.push_settings(&a.ui());
     }));
+    ui.on_neck_key_picked(|k| with_app(|a| {
+        a.tu.key = k.rem_euclid(12);
+        a.tu.save(a.lib.root());
+        a.tu.push_neck(&a.ui());
+    }));
+    ui.on_neck_scale_step(|d| with_app(|a| {
+        let n = crate::neck::SCALES.len() as i32;
+        a.tu.scale = (a.tu.scale as i32 + d).rem_euclid(n) as usize;
+        a.tu.save(a.lib.root());
+        a.tu.push_neck(&a.ui());
+    }));
     ui.on_page_picked(|page| with_app(|a| {
         // MUTE belongs to the tuner: leaving the page brings the sound back
         if page != 4 && a.ui().get_tuner_mute() {
@@ -2884,6 +2961,9 @@ fn bind(ui: &MainWindow) {
         if page == 6 {
             // looper memory on the first visit, not at start-up
             a.ensure_loop_buffer();
+        }
+        if page == 7 {
+            a.tu.push_neck(&a.ui());
         }
         if page == 4 {
             // a fresh visit starts with no string marked tuned

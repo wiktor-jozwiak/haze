@@ -1,0 +1,195 @@
+// Neck page: the fretboard (neck.slint) with a key and a scale over the strings of the
+// tuner's tuning, and the note being played lit where it sits on the neck. The pitch comes
+// from the tuner on the PC engine; the scale view works without it.
+import { T } from "theme.slint";
+import { Pick } from "parts.slint";
+import { Seg, Step, Group } from "page-tuner.slint";
+import { Neck, NeckDot } from "neck.slint";
+
+export component NeckPage inherits VerticalLayout {
+    /// the PC engine runs and listens to the guitar input
+    in property <bool> engine;
+    in property <bool> active;
+    in property <string> note: "—";
+    in property <int> octave;
+    /// cents from the nearest note
+    in property <float> cents;
+    in property <string> tuning-name;
+    /// open-string note names, lowest first
+    in property <[string]> neck-strings;
+    in property <[NeckDot]> neck-dots;
+    in property <[NeckDot]> neck-live;
+    /// pitch class of the key, 0 = C
+    in property <int> neck-key;
+    in property <string> neck-scale;
+    callback tuning-request();
+    callback key-picked(int);
+    /// -1 previous scale, +1 next
+    callback scale-step(int);
+
+    property <bool> in-tune: active && abs(cents) < 2;
+    property <color> lit: !active ? T.text-off : in-tune ? T.led-green : abs(cents) < 10 ? T.led-yellow : T.led-red;
+
+    padding-top: 6px;
+    spacing: 16px;
+
+    // ---------------------------------------------------------------- header
+    HorizontalLayout {
+        height: 44px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            Text {
+                text: "Neck";
+                color: T.text;
+                font-family: T.display;
+                font-size: 24px;
+                font-weight: 700;
+            }
+            Text {
+                text: "Pick a key and a scale; a note you play lights up where it sits.";
+                color: T.text-2;
+                font-size: 12.5px;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        VerticalLayout {
+            alignment: center;
+            Pick {
+                text: tuning-name;
+                clicked => { tuning-request(); }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- board
+    Rectangle {
+        vertical-stretch: 1;
+        border-radius: T.r-card;
+        background: @radial-gradient(circle, #1C1E23 0%, #131418 75%);
+        border-width: 1px;
+        border-color: T.line;
+        clip: true;
+
+        VerticalLayout {
+            padding: 18px;
+            padding-left: 22px;
+            padding-right: 22px;
+            spacing: 14px;
+            // key | scale | what is playing
+            HorizontalLayout {
+                height: 36px;
+                spacing: 14px;
+                Text {
+                    text: "KEY";
+                    color: T.text-3;
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    vertical-alignment: center;
+                }
+                Group {
+                    width: keys.preferred-width + 6px;
+                    keys := HorizontalLayout {
+                        padding: 3px;
+                        spacing: 1px;
+                        for k[i] in ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]: Seg {
+                            text: k;
+                            active: neck-key == i;
+                            clicked => { key-picked(i); }
+                        }
+                    }
+                }
+                Group {
+                    width: sc.preferred-width + 6px;
+                    sc := HorizontalLayout {
+                        padding: 3px;
+                        spacing: 6px;
+                        Step {
+                            text: "‹";
+                            clicked => { scale-step(-1); }
+                        }
+                        Text {
+                            width: 150px;
+                            text: neck-scale;
+                            color: T.text;
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        Step {
+                            text: "›";
+                            clicked => { scale-step(1); }
+                        }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // the note being played, or why there is none
+                if engine && active: HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: note + octave;
+                        color: root.lit;
+                        font-family: T.display;
+                        font-size: 24px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: (cents >= 0 ? "+" : "−") + round(abs(cents)) + " ¢";
+                        color: T.text-3;
+                        font-family: T.mono;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                if !(engine && active): Text {
+                    text: engine ? "Play a note to see it on the neck" : "Start the PC engine to see what you play";
+                    color: T.text-3;
+                    font-size: 12.5px;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
+            // string pitch grows with the window, 30..52 px
+            Neck {
+                vertical-stretch: 2;
+                min-height: max(4, neck-strings.length) * 30px + 22px;
+                max-height: max(4, neck-strings.length) * 52px + 22px;
+                strings: neck-strings;
+                dots: neck-dots;
+                live: neck-live;
+                lit: root.lit;
+            }
+            Rectangle { vertical-stretch: 1; }
+            // legend
+            HorizontalLayout {
+                alignment: center;
+                spacing: 18px;
+                height: 18px;
+                for l[i] in ["root", "in the scale", "playing now"]: HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 12px;
+                            height: 12px;
+                            border-radius: 6px;
+                            background: i == 0 ? T.accent : i == 1 ? #16171B : T.led-green;
+                            border-width: i == 1 ? 1.5px : 0;
+                            border-color: T.accent.with-alpha(0.75);
+                        }
+                    }
+                    Text {
+                        text: l;
+                        color: T.text-3;
+                        font-size: 11.5px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,219 @@
+// Fretboard of the tuner page (NECK mode): rosewood board (tiled bitmap from katana-art),
+// nickel frets, pearl inlays, strings of the chosen tuning, and the note dots Rust computes:
+// the key's scale, and the note being played lit in the tuner colour.
+// Static apart from the dots: a new scale or a new played note repaints only the dots that
+// change; nothing animates on its own.
+import { T } from "theme.slint";
+
+/// One marked position. `string` 0 is the lowest string (drawn at the bottom, as in tab),
+/// `fret` 0 is the open string (drawn left of the nut), `degree` 0 is the root, -1 a note
+/// outside the scale.
+export struct NeckDot {
+    string: int,
+    fret: int,
+    degree: int,
+    label: string,
+}
+
+export component Neck inherits Rectangle {
+    /// open-string note names, lowest first
+    in property <[string]> strings;
+    in property <[NeckDot]> dots;
+    /// positions of the note being played
+    in property <[NeckDot]> live;
+    in property <color> lit: T.accent;
+
+    /// must match `neck::FRETS` in Rust
+    property <int> frets: 22;
+    property <int> n: max(1, strings.length);
+    // headstock side: string names, then the open-string column, then the nut
+    property <length> names-w: 26px;
+    property <length> open-w: 36px;
+    property <length> nut-w: 7px;
+    property <length> board-x: names-w + open-w + nut-w;
+    property <length> board-w: self.width - board-x - 6px;
+    property <length> numbers-h: 22px;
+    property <length> board-h: self.height - numbers-h;
+    /// gap between the board edge and the outer strings
+    property <length> edge: 15px;
+    property <length> pitch: (board-h - 2 * edge) / max(1, n - 1);
+
+    /// x of fret wire `f` (0 = nut). Real fret spacing narrows 2^(1/12) per fret; blended
+    /// with even spacing so the high frets stay wide enough for a dot.
+    pure function wire(f: int) -> length {
+        return board-x + board-w * (0.72 * (1 - Math.pow(2, -f / 12)) / (1 - Math.pow(2, -frets / 12)) + 0.28 * f / frets);
+    }
+    /// centre x of the space a finger presses for fret `f` (0 = open string)
+    pure function cell(f: int) -> length {
+        return f == 0 ? names-w + open-w / 2 : (wire(f - 1) + wire(f)) / 2;
+    }
+    /// centre y of string `s` (0 = lowest, at the bottom)
+    pure function sy(s: int) -> length {
+        return edge + (n - 1 - s) * pitch;
+    }
+
+    // ---------------------------------------------------------------- board
+    Rectangle {
+        x: root.board-x;
+        y: 0;
+        width: root.board-w;
+        height: root.board-h;
+        border-radius: 3px;
+        // the tile covers it; the fill is what casts the shadow
+        background: #2A1A12;
+        clip: true;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 6px;
+        drop-shadow-color: #00000090;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("tex/rosewood.png");
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+        }
+        // rounded-edge shading: the board falls away at the top and bottom edges
+        Rectangle {
+            background: @linear-gradient(180deg, #00000066 0%, #00000000 14%, #00000000 86%, #00000080 100%);
+        }
+        // binding
+        Rectangle { y: 0; height: 2px; background: #D9CFBC; }
+        Rectangle { y: parent.height - 2px; height: 2px; background: #B9AE9A; }
+    }
+
+    // inlays: single pearl dots, a pair at 12
+    for f in [3, 5, 7, 9, 15, 17, 19, 21]: Rectangle {
+        x: root.cell(f) - 7px;
+        y: root.board-h / 2 - 7px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: @radial-gradient(circle, #F4F1EA 0%, #CFC8BB 70%, #A39C90 100%);
+        opacity: 0.85;
+    }
+    for k in 2: Rectangle {
+        x: root.cell(12) - 7px;
+        y: root.edge + (root.board-h - 2 * root.edge) * (k == 0 ? 0.27 : 0.73) - 7px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: @radial-gradient(circle, #F4F1EA 0%, #CFC8BB 70%, #A39C90 100%);
+        opacity: 0.85;
+    }
+
+    // frets: nickel wire, lit edge left, shadow right
+    for f in root.frets: Rectangle {
+        x: root.wire(f + 1) - 1.5px;
+        y: 2px;
+        width: 3px;
+        height: root.board-h - 4px;
+        background: @linear-gradient(90deg, #8E9096 0%, #EDEEF0 40%, #9A9CA2 75%, #3A3B3F 100%);
+    }
+    // nut: bone
+    Rectangle {
+        x: root.board-x - root.nut-w;
+        y: -2px;
+        width: root.nut-w;
+        height: root.board-h + 4px;
+        border-radius: 2px;
+        background: @linear-gradient(90deg, #BFB7A6 0%, #F1ECE0 45%, #D6CEBD 100%);
+    }
+
+    // ---------------------------------------------------------------- strings
+    // wound strings (lower half of the set) darker and thicker
+    for s[i] in root.strings: Rectangle {
+        property <bool> wound: i < root.n / 2;
+        property <length> th: 1px + (root.n - 1 - i) * 3px / max(1, root.n - 1);
+        // shadow on the board
+        Rectangle {
+            x: root.board-x;
+            y: root.sy(i) + th / 2 + 1px;
+            width: root.board-w;
+            height: 1px;
+            background: #00000070;
+        }
+        Rectangle {
+            x: root.names-w + 4px;
+            y: root.sy(i) - th / 2;
+            width: root.width - root.names-w - 10px;
+            height: th;
+            background: wound
+                ? @linear-gradient(180deg, #5E5850 0%, #D8D0C2 45%, #6B655C 100%)
+                : @linear-gradient(180deg, #707378 0%, #F2F3F5 45%, #7D8086 100%);
+        }
+        Text {
+            x: 0;
+            y: root.sy(i) - self.height / 2;
+            width: root.names-w - 4px;
+            horizontal-alignment: right;
+            text: s;
+            color: T.text-2;
+            font-family: T.mono;
+            font-size: 12px;
+            font-weight: 700;
+        }
+    }
+
+    // ---------------------------------------------------------------- fret numbers
+    for f in root.frets: Text {
+        property <int> k: f + 1;
+        property <bool> marked: k == 3 || k == 5 || k == 7 || k == 9 || k == 12 || k == 15 || k == 17 || k == 19 || k == 21;
+        x: root.cell(k) - 12px;
+        y: root.board-h + 6px;
+        width: 24px;
+        horizontal-alignment: center;
+        text: k;
+        color: marked ? T.text-2 : T.text-off;
+        font-family: T.mono;
+        font-size: 10px;
+        font-weight: marked ? 700 : 400;
+    }
+
+    // ---------------------------------------------------------------- scale dots
+    for d in root.dots: Rectangle {
+        property <bool> is-root: d.degree == 0;
+        x: root.cell(d.fret) - 11px;
+        y: root.sy(d.string) - 11px;
+        width: 22px;
+        height: 22px;
+        border-radius: 11px;
+        background: is-root ? T.accent : #16171BE6;
+        border-width: is-root ? 0 : 1.5px;
+        border-color: T.accent.with-alpha(0.75);
+        Text {
+            text: d.label;
+            color: is-root ? T.accent-ink : T.text;
+            font-size: 10px;
+            font-weight: 700;
+        }
+    }
+
+    // ---------------------------------------------------------------- the note being played
+    for d in root.live: Rectangle {
+        x: root.cell(d.fret) - 22px;
+        y: root.sy(d.string) - 22px;
+        width: 44px;
+        height: 44px;
+        // glow
+        Rectangle {
+            border-radius: 22px;
+            background: @radial-gradient(circle, root.lit.with-alpha(0.55) 0%, root.lit.with-alpha(0) 70%);
+        }
+        Rectangle {
+            x: 8px;
+            y: 8px;
+            width: 28px;
+            height: 28px;
+            border-radius: 14px;
+            background: root.lit;
+            border-width: 2px;
+            border-color: #FFFFFFCC;
+            Text {
+                text: d.label;
+                color: T.accent-ink;
+                font-size: 12px;
+                font-weight: 800;
+            }
+        }
+    }
+}

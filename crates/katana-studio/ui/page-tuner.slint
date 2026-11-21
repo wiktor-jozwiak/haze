@@ -16,7 +16,7 @@ export struct TunerString {
     tuned: bool,
 }
 
-component Seg inherits Rectangle {
+export component Seg inherits Rectangle {
     in property <string> text;
     in property <bool> active;
     callback clicked;
@@ -36,7 +36,7 @@ component Seg inherits Rectangle {
     }
 }
 
-component Step inherits Rectangle {
+export component Step inherits Rectangle {
     in property <string> text;
     callback clicked;
     width: 30px;
@@ -55,7 +55,7 @@ component Step inherits Rectangle {
     }
 }
 
-component Group inherits Rectangle {
+export component Group inherits Rectangle {
     border-radius: 9px;
     background: T.well;
     border-width: 1px;

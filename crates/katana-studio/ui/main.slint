@@ -21,13 +21,15 @@ import { LibraryPage } from "page-library.slint";
 import { SetlistsPage } from "page-setlists.slint";
 import { StartersPage } from "page-starters.slint";
 import { TunerPage, TunerString } from "page-tuner.slint";
+import { NeckDot } from "neck.slint";
+import { NeckPage } from "page-neck.slint";
 import { PcFxPage, PcCard, PcCtl } from "page-pcfx.slint";
 import { Picker } from "picker.slint";
 import { SlotPicker, ConfirmWrite, ImportDialog, AddToSetlist, TagsDialog, KeysDialog } from "dialogs.slint";
 import { LiveView } from "live.slint";
 import { EmptyState } from "art.slint";
 
-export { T, Pedal, PedalKnob, ToneRow, NavItem, Essential, ParamRow, TemplateRow, BlockChip, Slot, Opt, ChainOpt, TunerString, PcCard, PcCtl, MixCh, DrumRow }
+export { T, Pedal, PedalKnob, ToneRow, NavItem, Essential, ParamRow, TemplateRow, BlockChip, Slot, Opt, ChainOpt, TunerString, NeckDot, PcCard, PcCtl, MixCh, DrumRow }
 
 // ---------------------------------------------------------------- window
 
@@ -57,7 +59,7 @@ export component MainWindow inherits Window {
     in property <int> selected-index: -1;
     in property <bool> has-selection;
     in property <[Essential]> essentials;
-    /// 0 Rig, 1 Library, 2 Setlists, 3 Starter rigs, 4 Tuner, 5 PC FX, 6 Practice
+    /// 0 Rig, 1 Library, 2 Setlists, 3 Starter rigs, 4 Tuner, 5 PC FX, 6 Practice, 7 Neck
     in-out property <int> page;
     in property <[TemplateRow]> templates;
     in-out property <string> query;
@@ -122,10 +124,18 @@ export component MainWindow inherits Window {
     in property <int> tuner-reference: 440;
     in property <bool> tuner-mute;
     in property <bool> tuner-chromatic;
+    // neck page (page 7)
+    in property <[string]> neck-strings;
+    in property <[NeckDot]> neck-dots;
+    in property <[NeckDot]> neck-live;
+    in property <int> neck-key;
+    in property <string> neck-scale;
     callback tuner-tuning-request();
     callback tuner-reference-changed(int);
     callback tuner-mute-toggled(bool);
     callback tuner-mode-picked(bool);
+    callback neck-key-picked(int);
+    callback neck-scale-step(int);
     // PC FX page
     in property <[PcCard]> pcfx-cards;
     in property <int> pcfx-bpm: 100;
@@ -359,44 +369,50 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 4px;
                     PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: "RIG";
                         active: page == 0;
                         clicked => { page-picked(0); }
                     }
                     PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: "LIBRARY";
                         badge: nav.length > 1 ? nav[1].count : "";
                         active: page == 1;
                         clicked => { page-picked(1); }
                     }
                     PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: "SETLISTS";
                         active: page == 2;
                         clicked => { page-picked(2); }
                     }
                     PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: root.bar-compact ? "STARTERS" : "STARTER RIGS";
                         active: page == 3;
                         clicked => { page-picked(3); }
                     }
                     PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: "TUNER";
                         active: page == 4;
                         clicked => { page-picked(4); }
                     }
+                    PanelKey {
+                        pad: root.bar-compact ? 4px : 12px;
+                        text: "NECK";
+                        active: page == 7;
+                        clicked => { page-picked(7); }
+                    }
                     if !T.hw: PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: "PC FX";
                         active: page == 5;
                         clicked => { page-picked(5); }
                     }
                     PanelKey {
-                        pad: root.bar-compact ? 5px : 12px;
+                        pad: root.bar-compact ? 4px : 12px;
                         text: "PRACTICE";
                         active: page == 6;
                         clicked => { page-picked(6); }
@@ -522,7 +538,7 @@ export component MainWindow inherits Window {
                             alignment: center;
                             Pick {
                                 text: "In: " + audio-input;
-                                max-width: root.bar-compact ? 74px : 130px;
+                                max-width: root.bar-compact ? 60px : 130px;
                                 clicked => { audio-device-request(true); }
                             }
                         }
@@ -530,7 +546,7 @@ export component MainWindow inherits Window {
                             alignment: center;
                             Pick {
                                 text: "Out: " + audio-device;
-                                max-width: root.bar-compact ? 74px : 130px;
+                                max-width: root.bar-compact ? 60px : 130px;
                                 clicked => { audio-device-request(false); }
                             }
                         }
@@ -1328,6 +1344,25 @@ export component MainWindow inherits Window {
                 mute-toggled(m) => { tuner-mute-toggled(m); }
                 mode-picked(c) => { tuner-mode-picked(c); }
                 engine-request => { mode-picked(false); }
+            }
+
+            // ============================================= page: Neck
+            if page == 7: NeckPage {
+                vertical-stretch: 1;
+                engine: !T.hw && audio-running;
+                active: tuner-active;
+                note: tuner-note;
+                octave: tuner-octave;
+                cents: tuner-cents;
+                tuning-name: tuner-tuning-name;
+                neck-strings: neck-strings;
+                neck-dots: neck-dots;
+                neck-live: neck-live;
+                neck-key: neck-key;
+                neck-scale: neck-scale;
+                tuning-request => { tuner-tuning-request(); }
+                key-picked(k) => { neck-key-picked(k); }
+                scale-step(d) => { neck-scale-step(d); }
             }
 
 

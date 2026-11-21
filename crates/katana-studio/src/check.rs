@@ -27,6 +27,7 @@ const VIEWS: &[(&str, &[&str], &[(&str, &str)])] = &[
     ("standalone", &[], &[("HAZE_PC_MODE", "1")]),
     ("rig-katana", &[], &[("HAZE_SKIN", "1")]),
     ("tuner", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "4"), ("HAZE_FAKE_TUNER", "1")]),
+    ("neck", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "7"), ("HAZE_FAKE_NECK", "1")]),
     ("pcfx", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "5")]),
     ("practice", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "6"), ("HAZE_FAKE_PRACTICE", "1")]),
     ("practice-amp", &[], &[("HAZE_PAGE", "6")]),

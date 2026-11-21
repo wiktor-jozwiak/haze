@@ -58,6 +58,16 @@ pub fn render(lib: katana_core::Library, out: &str, tab: i32, hover: Option<(f32
             .collect();
         ui.set_tuner_strings(slint::ModelRc::new(slint::VecModel::from(v)));
     }
+    // HAZE_FAKE_NECK=1 (with HAZE_PAGE=7): A minor pentatonic, A2 ringing 3 cents flat
+    if std::env::var_os("HAZE_FAKE_NECK").is_some() {
+        ui.set_audio_running(true);
+        ui.invoke_neck_key_picked(9);
+        ui.set_tuner_active(true);
+        ui.set_tuner_note("A".into());
+        ui.set_tuner_octave(2);
+        ui.set_tuner_cents(-3.4);
+        crate::app::fake_neck_note(45);
+    }
     // HAZE_FAKE_PRACTICE=1: drums running on the user groove, a loop playing, meters lit
     if std::env::var_os("HAZE_FAKE_PRACTICE").is_some() {
         use slint::Model;

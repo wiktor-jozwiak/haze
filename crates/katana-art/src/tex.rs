@@ -104,7 +104,30 @@ fn dots(dir: &Path) {
     });
 }
 
+/// Rosewood fretboard: dark red-brown, long grain along the neck (x), open pores as short
+/// dark dashes, a slow figure so the repeat does not show. Dark on purpose: note dots and
+/// pearl inlays sit on it.
+fn rosewood(dir: &Path) {
+    let (w, h) = (512usize, 96usize);
+    save(dir, "rosewood.png", w, h, |x, y| {
+        // grain lines: stretched along x, wobbling slowly in y (periods divide the tile)
+        let wob = (vnoise(x / 128.0, y / 24.0, 4, 4, 41) - 0.5) * 6.0;
+        let yy = y + wob;
+        let g1 = vnoise(x / 128.0, yy / 2.0, 4, 48, 42) - 0.5;
+        let g2 = vnoise(x / 32.0, yy / 1.0, 16, 96, 43) - 0.5;
+        // figure: broad darker / lighter bands
+        let fig = fbm(x / 128.0, y / 48.0, 4, 2, 2, 44) - 0.5;
+        // pores: sparse short dashes along the grain
+        let pore = vnoise(x / 6.0, y, 85, 96, 45);
+        let pore = sstep(0.78, 0.9, pore) * if hash(0, y as i32, 46) > 0.55 { 1.0 } else { 0.4 };
+        let grain = hash(x as i32, y as i32, 47) - 0.5;
+        let v = 0.135 + g1 * 0.030 + g2 * 0.016 + fig * 0.035 - pore * 0.045 + grain * 0.006;
+        rgb(v * 1.30, v * 0.78, v * 0.58)
+    });
+}
+
 pub fn run(dir: &Path) {
+    rosewood(dir);
     dots(dir);
     tolex(dir);
     brushed(dir);

@@ -23,6 +23,7 @@ mod eqcurve;
 mod pcfx;
 mod practice;
 mod history;
+mod neck;
 mod templates;
 #[cfg(test)]
 mod uitest;
@@ -31,7 +32,6 @@ use katana_core::Library;
 
 slint::include_modules!();
 
-fn main() {
 /// GUI-subsystem exe started from cmd/PowerShell: print into that console. Skipped when the
 /// parent already gave us handles (pipes from `snapshot-check`, redirects).
 #[cfg(windows)]
@@ -44,12 +44,13 @@ fn attach_console() {
     }
 }
 
+fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let root = std::env::var_os("KATANA_STUDIO_LIBRARY").map(Into::into).unwrap_or_else(Library::default_root);
     #[cfg(windows)]
     if !args.is_empty() {
         attach_console();
     }
+    let root = std::env::var_os("KATANA_STUDIO_LIBRARY").map(Into::into).unwrap_or_else(Library::default_root);
     let mut lib = match Library::open(&root) {
         Ok(l) => l,
         Err(e) => {
