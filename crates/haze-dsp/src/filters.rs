@@ -87,6 +87,13 @@ impl Biquad {
         );
     }
 
+    /// Band-reject: unity everywhere except a narrow cut at `f` (bandwidth ≈ f / q).
+    pub fn notch(&mut self, f: f32, q: f32, fs: f32) {
+        let (c, s) = Self::w(f, fs);
+        let al = s / (2.0 * q);
+        self.set(1.0, -2.0 * c, 1.0, 1.0 + al, -2.0 * c, 1.0 - al);
+    }
+
     /// First-order-ish allpass via biquad (used by the phaser).
     pub fn allpass(&mut self, f: f32, q: f32, fs: f32) {
         let (c, s) = Self::w(f, fs);

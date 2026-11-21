@@ -4,7 +4,6 @@
 //! IRs are converted to partition spectra off the audio thread (`IrSpectrum::new`) and handed
 //! over as a `Box`; the convolver swaps them in without allocating.
 
-use crate::filters::Biquad;
 use realfft::num_complex::Complex;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
@@ -135,49 +134,117 @@ impl Convolver {
     }
 }
 
-/// Built-in cabinets, synthesised once at start-up (no shipped audio files): an impulse plus
-/// a short decaying noise tail, band-limited like a guitar speaker, with cabinet resonances.
+/// Built-in cabinets, designed once at start-up (no shipped audio files). Each is the
+/// minimum-phase impulse response of a measured-style speaker curve: the low resonance of
+/// the cabinet (open backs roll off earlier), the midrange dip, the cone's presence peaks
+/// around 2–3.5 kHz and the steep rolloff above ~5 kHz that makes a guitar speaker sound
+/// like one, plus a little cone-breakup ripple. Minimum phase keeps the attack tight, as a
+/// close-miked speaker is, instead of the smeared tail a noise-based IR has.
 pub const CABS: [&str; 3] = ["1x12 Open", "2x12 Open", "4x12 Closed"];
 
+/// Magnitude targets (Hz, dB), interpolated on a log-frequency axis.
+const CAB_CURVES: [&[(f32, f32)]; 3] = [
+    // 1x12 open back, American ceramic speaker: loose lows, smooth highs
+    &[
+        (20.0, -30.0), (60.0, -14.0), (90.0, -4.0), (120.0, 0.0), (200.0, -1.0), (400.0, -2.0), (700.0, -3.0),
+        (1200.0, -1.0), (2000.0, 2.0), (2800.0, 4.0), (3500.0, 1.0), (4200.0, -2.0), (5000.0, -8.0),
+        (6000.0, -16.0), (8000.0, -30.0), (12000.0, -45.0), (24000.0, -60.0),
+    ],
+    // 2x12 open back, British alnico: chime peak near 3 kHz
+    &[
+        (20.0, -28.0), (55.0, -12.0), (85.0, -2.0), (110.0, 1.0), (200.0, 0.0), (450.0, -2.0), (800.0, -1.0),
+        (1500.0, 1.0), (2500.0, 4.0), (3200.0, 6.0), (4000.0, 2.0), (5000.0, -4.0), (6500.0, -15.0),
+        (8000.0, -28.0), (12000.0, -44.0), (24000.0, -60.0),
+    ],
+    // 4x12 closed back, British ceramic (V30 type): tight thump, upper-mid bark, fizz cut
+    &[
+        (20.0, -30.0), (50.0, -14.0), (75.0, -3.0), (105.0, 3.0), (140.0, 2.0), (250.0, 0.0), (500.0, -3.0),
+        (800.0, -2.0), (1500.0, 1.0), (2200.0, 3.0), (2800.0, 6.0), (3500.0, 2.0), (4000.0, -1.0),
+        (4800.0, 2.0), (5500.0, -6.0), (7000.0, -20.0), (9000.0, -34.0), (13000.0, -48.0), (24000.0, -60.0),
+    ],
+];
+
+/// Target response of built-in cabinet `kind` at `hz`, in dB (before normalisation).
+pub fn cab_target_db(kind: usize, hz: f32) -> f32 {
+    let c = CAB_CURVES[kind.min(2)];
+    let f = hz.clamp(c[0].0, c[c.len() - 1].0);
+    let i = c.windows(2).position(|w| f <= w[1].0).unwrap_or(c.len() - 2);
+    let ((f0, d0), (f1, d1)) = (c[i], c[i + 1]);
+    let t = (f / f0).ln() / (f1 / f0).ln();
+    let base = d0 + (d1 - d0) * t;
+    // cone breakup: a gentle ripple that grows from 1 to 5 kHz
+    let w = ((hz - 1000.0) / 4000.0).clamp(0.0, 1.0);
+    let ripple = 1.2 * w * (hz.log2() * 5.3 + kind as f32 * 1.7).sin();
+    base + ripple
+}
+
+/// Length of the built-in cabinet IRs (samples at 48 kHz: ~43 ms).
+const CAB_LEN: usize = 2048;
+
 pub fn builtin_cab(kind: usize, fs: f32) -> Vec<f32> {
-    let len = (0.04 * fs) as usize;
-    let mut seed = 0x9E37_79B9u32.wrapping_add(kind as u32 * 7919);
-    let mut rnd = move || {
-        seed ^= seed << 13;
-        seed ^= seed >> 17;
-        seed ^= seed << 5;
-        (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
-    };
-    let (decay_ms, hp, lp, res_f, res_db, notch_f, breakup_f) = match kind {
-        0 => (3.5, 90.0, 5200.0, 140.0, 4.0, 1400.0, 2600.0),
-        1 => (5.0, 75.0, 5000.0, 115.0, 6.0, 1100.0, 2400.0),
-        _ => (7.0, 65.0, 4400.0, 100.0, 8.0, 900.0, 2100.0),
-    };
-    let mut x: Vec<f32> = (0..len)
-        .map(|i| {
-            let t = i as f32 / fs * 1000.0;
-            let tail = rnd() * (-t / decay_ms).exp() * 0.35;
-            if i == 0 { 1.0 + tail } else { tail }
+    // minimum phase from the magnitude via the real cepstrum:
+    // c = IFFT(ln|H|); fold the anticausal half onto the causal one; H_min = exp(FFT(c))
+    let n = 16384;
+    let bins = n / 2 + 1;
+    let mut planner = RealFftPlanner::<f64>::new();
+    let fwd = planner.plan_fft_forward(n);
+    let inv = planner.plan_fft_inverse(n);
+    let mut spec: Vec<Complex<f64>> = (0..bins)
+        .map(|k| {
+            let hz = (k as f32 * fs / n as f32).max(1.0);
+            let db = cab_target_db(kind, hz) as f64;
+            Complex::new(db / 20.0 * std::f64::consts::LN_10, 0.0)
         })
         .collect();
-    let mut f = [Biquad::new(); 7];
-    f[0].highpass(hp, 0.8, fs);
-    f[1].highpass(hp, 0.8, fs);
-    f[2].lowpass(lp, 0.9, fs);
-    f[3].lowpass(lp * 1.2, 0.6, fs);
-    f[4].peak(res_f, 1.6, res_db, fs);
-    f[5].peak(notch_f, 1.2, -6.0, fs);
-    f[6].peak(breakup_f, 2.0, 5.0, fs);
-    for s in x.iter_mut() {
-        let mut v = *s;
-        for b in f.iter_mut() {
-            v = b.tick(v);
-        }
-        *s = v;
+    let mut cep = vec![0f64; n];
+    inv.process(&mut spec, &mut cep).expect("ifft");
+    cep.iter_mut().for_each(|x| *x /= n as f64);
+    for (i, x) in cep.iter_mut().enumerate() {
+        *x *= match i {
+            0 => 1.0,
+            i if i < n / 2 => 2.0,
+            i if i == n / 2 => 1.0,
+            _ => 0.0,
+        };
     }
-    normalize(&mut x);
+    fwd.process(&mut cep, &mut spec).expect("fft");
+    for c in spec.iter_mut() {
+        let m = c.re.exp();
+        *c = Complex::new(m * c.im.cos(), m * c.im.sin());
+    }
+    // the inverse real FFT wants a real DC and Nyquist bin
+    spec[0].im = 0.0;
+    spec[bins - 1].im = 0.0;
+    let mut ir = vec![0f64; n];
+    inv.process(&mut spec, &mut ir).expect("ifft");
+    let len = ((CAB_LEN as f32 * fs / 48000.0) as usize).min(MAX_IR);
+    let fade = len / 4;
+    let mut x: Vec<f32> = (0..len)
+        .map(|i| {
+            let w = if i + fade >= len { 0.5 + 0.5 * (std::f64::consts::PI * (i + fade - len) as f64 / fade as f64).cos() } else { 1.0 };
+            (ir[i] / n as f64 * w) as f32
+        })
+        .collect();
+    // level by the guitar's band, not by total energy: the old noise-tail cabs gave about
+    // +4 dB there on a clean note, and more on distortion, whose fizz they let through; +7 dB
+    // splits the difference so patches keep roughly their loudness
+    let bands = [150.0f64, 300.0, 600.0, 1200.0, 2400.0];
+    let mean_db = bands
+        .iter()
+        .map(|&hz| {
+            let w = std::f64::consts::TAU * hz / fs as f64;
+            let (re, im) = x.iter().enumerate().fold((0.0, 0.0), |(re, im), (k, &v)| (re + v as f64 * (w * k as f64).cos(), im - v as f64 * (w * k as f64).sin()));
+            20.0 * re.hypot(im).log10()
+        })
+        .sum::<f64>()
+        / bands.len() as f64;
+    let g = 10f64.powf((CAB_BAND_DB - mean_db) / 20.0) as f32;
+    x.iter_mut().for_each(|v| *v *= g);
     x
 }
+
+/// In-band gain of the built-in cabinets (mean over 150 Hz–2.4 kHz), dB.
+const CAB_BAND_DB: f64 = 7.0;
 
 /// Unit energy, so switching IRs keeps the level.
 pub fn normalize(x: &mut [f32]) {

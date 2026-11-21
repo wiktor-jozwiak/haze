@@ -92,27 +92,21 @@ export component Btn inherits Rectangle {
     callback clicked;
     height: compact ? 30px : 36px;
     min-width: lbl.preferred-width + (compact ? 24px : 34px);
-    // rubber keys; the primary one is the lit amber key
-    border-radius: 6px;
+    // flat keys; the primary one is filled with the accent
+    border-radius: 8px;
     background: !enabled ? transparent
-        : primary ? (ta.pressed ? @linear-gradient(180deg, T.accent.darker(0.25) 0%, T.accent 100%)
-            : ta.has-hover ? @linear-gradient(180deg, T.accent-hi.brighter(0.1) 0%, T.accent 100%)
-            : @linear-gradient(180deg, T.accent-hi 0%, T.accent.darker(0.1) 100%))
-        : (ta.pressed ? @linear-gradient(180deg, #141312 0%, #22201E 100%)
-            : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%)
-            : @linear-gradient(180deg, #33302D 0%, #1C1A19 100%));
+        : primary ? (ta.pressed ? T.accent.darker(0.15) : ta.has-hover ? T.accent-hi : T.accent)
+        : (ta.pressed ? #ffffff16
+            : ta.has-hover ? #ffffff10
+            : #ffffff08);
     border-width: 1px;
-    border-color: !enabled ? T.line : danger && ta.has-hover ? T.danger : #000000c0;
-    drop-shadow-blur: enabled && !ta.pressed ? 3px : 0;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: #00000080;
-    if enabled && !ta.pressed: Rectangle { x: 5px; y: 1px; width: parent.width - 10px; height: 1px; background: root.primary ? #ffffff60 : #ffffff1c; }
+    border-color: !enabled ? T.line : primary ? transparent : danger && ta.has-hover ? T.danger : #ffffff12;
     lbl := Text {
         text: root.text;
         font-family: T.display;
-        font-weight: 700;
-        font-size: compact ? 13px : 14px;
-        letter-spacing: 0.4px;
+        font-weight: 600;
+        font-size: compact ? 12.5px : 13.5px;
+        letter-spacing: 0.2px;
         color: !enabled ? T.text-3 : primary ? T.accent-ink : danger && ta.has-hover ? T.danger : T.silk;
     }
     ta := TouchArea {
@@ -172,7 +166,7 @@ export component SearchField inherits Rectangle {
     public function focus-input() { input.focus(); }
     height: 34px;
     border-radius: 6px;
-    background: @linear-gradient(180deg, #070707 0%, #121110 100%);
+    background: T.well;
     border-width: 1px;
     border-color: input.has-focus ? T.accent-lo : #000000a0;
     HorizontalLayout {

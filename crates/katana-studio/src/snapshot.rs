@@ -40,6 +40,42 @@ pub fn render(lib: katana_core::Library, out: &str, tab: i32, hover: Option<(f32
     if let Some(p) = std::env::var("HAZE_PAGE").ok().and_then(|v| v.parse().ok()) {
         ui.invoke_page_picked(p);
     }
+    // HAZE_FAKE_TUNER=1: tuner page with a reading (A string 3.4 cents flat, low E tuned)
+    if std::env::var_os("HAZE_FAKE_TUNER").is_some() {
+        ui.set_audio_running(true);
+        ui.set_tuner_active(true);
+        ui.set_tuner_note("A".into());
+        ui.set_tuner_octave(2);
+        ui.set_tuner_needle(-3.4);
+        ui.set_tuner_hz(109.78);
+        ui.set_tuner_target("A2".into());
+        ui.set_tuner_target_hz(110.0);
+        ui.set_tuner_strobe(0.3);
+        let v: Vec<crate::TunerString> = ["E", "A", "D", "G", "B", "E"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| crate::TunerString { note: (*n).into(), active: i == 1, tuned: i == 0 })
+            .collect();
+        ui.set_tuner_strings(slint::ModelRc::new(slint::VecModel::from(v)));
+    }
+    // HAZE_FAKE_PRACTICE=1: drums running on the user groove, a loop playing, meters lit
+    if std::env::var_os("HAZE_FAKE_PRACTICE").is_some() {
+        use slint::Model;
+        ui.set_audio_running(true);
+        ui.invoke_user_slot_picked(0);
+        ui.set_drum_on(true);
+        ui.set_drum_step(6);
+        ui.set_loop_state(2);
+        ui.set_loop_progress(0.42);
+        ui.set_loop_time("8.0 s".into());
+        let bus = ui.get_mix_bus();
+        for (i, p) in [0.82f32, 0.66, 0.74].into_iter().enumerate() {
+            if let Some(mut r) = bus.row_data(i) {
+                r.peak = p;
+                bus.set_row_data(i, r);
+            }
+        }
+    }
     if std::env::var_os("HAZE_PICKER").is_some() {
         ui.set_show_picker(true);
     }
@@ -67,6 +103,19 @@ pub fn render(lib: katana_core::Library, out: &str, tab: i32, hover: Option<(f32
         slint::platform::update_timers_and_animations();
         window.draw_if_needed(|_| {});
         window.dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(x, y) });
+    }
+    // HAZE_CLICK=x,y: one left click (logical px) after the first frame, e.g. to open a menu
+    if let Some((x, y)) = std::env::var("HAZE_CLICK").ok().and_then(|v| {
+        let (x, y) = v.split_once(',')?;
+        Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))
+    }) {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        slint::platform::update_timers_and_animations();
+        window.draw_if_needed(|_| {});
+        let position = slint::LogicalPosition::new(x, y);
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
     }
     let mut buf = vec![PremultipliedRgbaColor::default(); (w * h) as usize];
     for _ in 0..4 {

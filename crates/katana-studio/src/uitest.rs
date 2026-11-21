@@ -117,6 +117,117 @@ fn ui_flows() {
     assert_eq!(ui.get_tag(), "", "filter on a tag nobody has is dropped");
     assert_eq!(ui.get_tones().row_count(), 3);
 
+    // ---- November Rain starter: what the PC engine plays
+    {
+        use haze_dsp::{EqKey, Params, P};
+        ui.invoke_page_picked(3);
+        let i = crate::templates::TEMPLATES.iter().position(|t| t.name == "November Rain").unwrap();
+        ui.invoke_template_use(i as i32);
+        assert_eq!(ui.get_ed_name(), "November Rain");
+        let d = crate::app::dsp_params();
+        let eq = |k| d.get_i(Params::eq(0, k));
+        let line = format!(
+            "voicing {} gain {:.2} mid {:.2} | drive on {} model {} amt {:.2} | guitar sim on {} | eq on {} pre {} lc {} lm {}/{} hm {}/{} hc {} | delay {} ms fb {:.2} wet {:.2} | reverb type {} {:.1} s wet {:.2} | gate {} {:.0} dB",
+            d.get(P::AmpVoicing), d.get(P::AmpGain), d.get(P::AmpMid),
+            d.get(P::DriveOn), d.get(P::DriveModel), d.get(P::DriveAmt),
+            d.get_i(Params::fx(1, EqKey::On)),
+            eq(EqKey::On), eq(EqKey::Pre), eq(EqKey::V(0)), eq(EqKey::V(2)), eq(EqKey::V(4)), eq(EqKey::V(5)), eq(EqKey::V(7)), eq(EqKey::V(9)),
+            d.get(P::DelayMs), d.get(P::DelayFeedback), d.get(P::DelayMix),
+            d.get(P::ReverbType), d.get(P::ReverbTime), d.get(P::ReverbMix),
+            d.get(P::GateOn), d.get(P::GateThreshDb),
+        );
+        eprintln!("November Rain on the PC engine: {line}");
+        assert_eq!(d.get(P::AmpVoicing), 4.0, "LEAD = the Marshall lead voicing");
+        assert_eq!((d.get(P::DriveOn), d.get(P::DriveModel)), (1.0, 7.0), "MID BOOST stays a clean mid boost");
+        assert_eq!(d.get_i(Params::fx(1, EqKey::On)), 0.0, "guitar sim waits for single coils");
+        assert_eq!((eq(EqKey::On), eq(EqKey::Pre), eq(EqKey::V(4)), eq(EqKey::V(7))), (1.0, 0.0, -3.0, 3.0));
+        assert_eq!((d.get(P::DelayOn), d.get(P::DelayMs)), (1.0, 375.0));
+        assert_eq!((d.get(P::ReverbOn), d.get(P::ReverbType)), (1.0, 3.0));
+    }
+
+    // ---- every starter on the PC engine: loudness close to the others
+    {
+        ui.invoke_page_picked(3);
+        let mut rows = vec![];
+        for (i, t) in crate::templates::TEMPLATES.iter().enumerate() {
+            ui.invoke_template_use(i as i32);
+            rows.push((t.name, t.style, starter_loudness(&crate::app::dsp_params())));
+        }
+        let mut sorted: Vec<f32> = rows.iter().map(|r| r.2).collect();
+        sorted.sort_by(f32::total_cmp);
+        let median = sorted[sorted.len() / 2];
+        for (name, style, l) in &rows {
+            eprintln!("starter {name:<16} {style:<8} {l:+6.1} LUFS ({:+.1} dB vs median)", l - median);
+        }
+        for (name, _, l) in &rows {
+            assert!((l - median).abs() <= 2.5, "{name}: {l:.1} LUFS, median {median:.1}: starters must sit within 2.5 dB");
+        }
+    }
+
+    // ---- practice page: user groove grid, mixer, kit
+    ui.invoke_page_picked(6);
+    assert_eq!(ui.get_page(), 6);
+    let cell = |r: usize, st: usize| ui.get_drum_rows().row_data(r).unwrap().cells.row_data(st).unwrap();
+    ui.invoke_drum_pattern_picked(8); // Disco: shown, read-only
+    assert_eq!(cell(0, 4), 3, "disco kick on beat 2");
+    ui.invoke_drum_cell(0, 1, -1);
+    assert_eq!(cell(0, 1), 0, "presets do not edit");
+    ui.invoke_user_slot_picked(1);
+    assert_eq!(ui.get_drum_pattern(), haze_dsp::practice::USER as i32);
+    assert_eq!(ui.get_user_slot(), 1);
+    assert!((0..16).all(|st| cell(0, st) == 0), "U2 starts empty");
+    ui.invoke_drum_cell(0, 2, -1);
+    ui.invoke_drum_cell(0, 2, -1);
+    assert_eq!(cell(0, 2), 3, "rest → normal → accent");
+    ui.invoke_drum_cell(0, 2, 0);
+    assert_eq!(cell(0, 2), 0, "right-click clears");
+    ui.invoke_user_len_picked(12);
+    assert_eq!((ui.get_bar_len(), ui.get_drum_rows().row_data(0).unwrap().cells.row_count()), (12, 12));
+    ui.invoke_drum_pattern_picked(3);
+    ui.invoke_user_copy();
+    assert_eq!(ui.get_user_slot(), 1);
+    assert_eq!(ui.get_user_len(), 16, "a copied 16-step groove brings its length");
+    assert_eq!(cell(1, 4), 3, "funk snare copied into U2");
+    let bus = |i: usize| ui.get_mix_bus().row_data(i).unwrap();
+    assert_eq!(bus(0).db, "0.0");
+    ui.invoke_mix_set(0, 0.5);
+    assert_eq!(bus(0).db, "−6.1");
+    ui.invoke_mix_mute(0);
+    assert!(bus(0).mute);
+    ui.invoke_mix_reset(0);
+    assert_eq!(bus(0).db, "0.0");
+    ui.invoke_mix_set(5, 0.0);
+    assert_eq!(ui.get_mix_kit().row_data(2).unwrap().db, "−∞", "hats fader down");
+    ui.invoke_kit_set(0, 9);
+    assert_eq!(ui.get_kit_tune(), 6, "tune clamps to ±6 st");
+    ui.invoke_kit_set(4, 0);
+    assert_eq!(ui.get_kit_fills(), 0);
+
     drop(ui);
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// K-weighted loudness (LUFS-like, ungated) of the DI riff through a copy of the engine params.
+fn starter_loudness(live: &haze_dsp::Params) -> f32 {
+    use haze_dsp::filters::Biquad;
+    let fs = 48000.0;
+    let p = std::sync::Arc::new(haze_dsp::Params::default());
+    for i in 0..haze_dsp::params::COUNT {
+        p.set_i(i, live.get_i(i));
+    }
+    let out = haze_dsp::render_offline(p, fs, 9.6);
+    let skip = (0.5 * fs) as usize;
+    let mut ms = 0f64;
+    for ch in 0..2 {
+        let (mut hs, mut hp) = (Biquad::new(), Biquad::new());
+        hs.high_shelf(1681.0, 4.0, fs);
+        hp.highpass(38.0, 0.5, fs);
+        for (i, s) in out.iter().skip(ch).step_by(2).enumerate() {
+            let k = hp.tick(hs.tick(*s));
+            if i >= skip {
+                ms += (k * k) as f64;
+            }
+        }
+    }
+    (-0.691 + 10.0 * (ms / (out.len() / 2 - skip) as f64).log10()) as f32
 }

@@ -1,0 +1,968 @@
+// Practice page: tempo and metronome with tap, the phrase looper, the speed trainer, a drum
+// machine with a 16-step grid for four user grooves and kit feel controls, and a mixer for
+// guitar, loop, drum bus and the kit's voices. Runs on the PC engine; settings stay editable
+// when it does not run. Values come from Rust (`practice.rs`): fader positions, dB texts,
+// meters at 30 Hz while the page shows. Nothing here animates on its own.
+import { T } from "theme.slint";
+import { Lamp, Silk } from "gear.slint";
+
+/// One mixer channel. `pos` is the fader 0..1 (gain (pos/0.71)², so 0.71 is 0 dB).
+export struct MixCh {
+    name: string,
+    pos: float,
+    db: string,
+    /// meter 0..1 over −60..0 dBFS
+    peak: float,
+    mute: bool,
+    /// the channel has a meter (guitar, loop, drum bus)
+    meter: bool,
+}
+
+/// One row of the drum grid: cells 0 rest, 1 ghost, 2 normal, 3 accent.
+export struct DrumRow {
+    name: string,
+    cells: [int],
+}
+
+component Key inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <color> lit: T.accent;
+    in property <bool> enabled: true;
+    in property <length> h: 30px;
+    in property <length> fs: 12px;
+    callback clicked;
+    min-width: t.preferred-width + 20px;
+    height: h;
+    border-radius: T.r;
+    background: active ? lit.with-alpha(0.18) : ta.pressed ? T.well : ta.has-hover && enabled ? T.hover : T.panel-hi;
+    border-width: 1px;
+    border-color: active ? lit.with-alpha(0.55) : #ffffff0d;
+    opacity: enabled ? 1 : 0.4;
+    t := Text {
+        text: root.text;
+        color: active ? lit : T.text;
+        font-family: T.display;
+        font-weight: 700;
+        font-size: root.fs;
+        letter-spacing: 0.4px;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Caption inherits Text {
+    color: T.text-3;
+    font-size: 11px;
+    vertical-alignment: center;
+}
+
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <string> note;
+    in property <color> glow: transparent;
+    border-radius: T.r-card;
+    background: @linear-gradient(180deg, T.panel-hi 0%, T.panel 100%);
+    border-width: 1px;
+    border-color: glow == transparent ? T.line : glow.with-alpha(0.6);
+    clip: true;
+    if root.glow != transparent: Rectangle {
+        background: @radial-gradient(circle, root.glow.with-alpha(0.10) 0%, root.glow.with-alpha(0) 70%);
+    }
+    VerticalLayout {
+        padding: 16px;
+        padding-top: 13px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            Silk { text: root.title; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.note;
+                color: T.text-2;
+                font-family: T.mono;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+        @children
+    }
+}
+
+/// On/off pill switch.
+component Switch inherits Rectangle {
+    in property <bool> on;
+    in property <color> hue: T.accent;
+    callback toggled;
+    width: 46px;
+    height: 24px;
+    border-radius: 12px;
+    background: on ? hue.with-alpha(0.85) : T.well;
+    border-width: 1px;
+    border-color: on ? hue : T.line-hi;
+    Rectangle {
+        x: root.on ? parent.width - self.width - 3px : 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: root.on ? #fff : T.text-3;
+        animate x { duration: 120ms; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+}
+
+/// ‹ value › stepper.
+component Stepper inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    callback down;
+    callback up;
+    spacing: 6px;
+    Text {
+        width: 52px;
+        text: root.label;
+        color: T.text-2;
+        font-size: 11px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+    Key { text: "‹"; h: 28px; fs: 14px; clicked => { root.down(); } }
+    Rectangle {
+        horizontal-stretch: 1;
+        min-width: 70px;
+        height: 28px;
+        border-radius: 6px;
+        background: T.well;
+        border-width: 1px;
+        border-color: T.line;
+        Text {
+            text: root.value;
+            color: T.text;
+            font-family: T.mono;
+            font-size: 13px;
+            font-weight: 700;
+        }
+    }
+    Key { text: "›"; h: 28px; fs: 14px; clicked => { root.up(); } }
+}
+
+/// Horizontal fader 0..1 with its value text (kit feel).
+component HFader inherits HorizontalLayout {
+    in property <string> label;
+    in property <float> value;
+    in property <string> text;
+    /// value the fader snaps back to on double-click
+    in property <float> home;
+    in property <bool> centred;
+    callback moved(float);
+    spacing: 8px;
+    Text {
+        width: 58px;
+        text: root.label;
+        color: T.text-2;
+        font-size: 11px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+        height: 26px;
+        border-radius: 6px;
+        background: T.well;
+        border-width: 1px;
+        border-color: ta.has-hover ? T.line-hi : T.line;
+        // fill from the left, or from the middle for a ± control
+        Rectangle {
+            x: root.centred ? parent.width * min(0.5, clamp(root.value, 0, 1)) : 0;
+            width: root.centred ? parent.width * abs(clamp(root.value, 0, 1) - 0.5) : max(4px, parent.width * clamp(root.value, 0, 1));
+            border-radius: 6px;
+            background: T.accent.with-alpha(0.28);
+        }
+        Rectangle {
+            x: max(0px, parent.width * clamp(root.value, 0, 1) - 2px);
+            width: 3px;
+            background: T.accent;
+        }
+        Text {
+            x: parent.width - self.width - 9px;
+            text: root.text;
+            color: T.text;
+            font-family: T.mono;
+            font-size: 11px;
+        }
+        ta := TouchArea {
+            mouse-cursor: ew-resize;
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                    root.moved(clamp(self.mouse-x / self.width, 0, 1));
+                }
+            }
+            moved => {
+                if self.pressed {
+                    root.moved(clamp(self.mouse-x / self.width, 0, 1));
+                }
+            }
+            double-clicked => { root.moved(root.home); }
+            scroll-event(e) => {
+                root.moved(clamp(root.value + (e.delta-y > 0 ? 0.02 : -0.02), 0, 1));
+                accept
+            }
+        }
+    }
+}
+
+/// Mixer channel strip: name, dB, a vertical fader with the channel's meter, mute.
+component Strip inherits Rectangle {
+    in property <MixCh> ch;
+    in property <color> hue: T.accent;
+    callback moved(float);
+    callback reset;
+    callback mute;
+    width: 54px;
+    VerticalLayout {
+        spacing: 7px;
+        Text {
+            text: root.ch.name;
+            color: root.ch.mute ? T.text-3 : T.text;
+            font-family: T.display;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: root.ch.mute ? "MUTE" : root.ch.db;
+            color: root.ch.mute ? T.led-red : T.text-2;
+            font-family: T.mono;
+            font-size: 10px;
+            horizontal-alignment: center;
+        }
+        track := Rectangle {
+            vertical-stretch: 1;
+            min-height: 80px;
+            property <length> thumb: 14px;
+            property <length> travel: self.height - thumb;
+            // 0 dB mark
+            Rectangle {
+                x: 6px;
+                y: (1 - 0.71) * track.travel + track.thumb / 2;
+                width: parent.width - 12px;
+                height: 1px;
+                background: T.line-hi;
+            }
+            // fader slot
+            Rectangle {
+                x: (parent.width - 6px) / 2 - (root.ch.meter ? 6px : 0px);
+                y: track.thumb / 2;
+                width: 6px;
+                height: track.travel;
+                border-radius: 3px;
+                background: T.well;
+                border-width: 1px;
+                border-color: T.line;
+                Rectangle {
+                    y: parent.height * (1 - clamp(root.ch.pos, 0, 1));
+                    height: parent.height * clamp(root.ch.pos, 0, 1);
+                    border-radius: 3px;
+                    background: root.ch.mute ? T.text-off : root.hue.with-alpha(0.55);
+                }
+            }
+            // meter: green → yellow → red over the top 12 dB
+            if root.ch.meter: Rectangle {
+                x: (parent.width - 6px) / 2 + 8px;
+                y: track.thumb / 2;
+                width: 5px;
+                height: track.travel;
+                border-radius: 2px;
+                background: T.well;
+                Rectangle {
+                    y: parent.height * (1 - clamp(root.ch.peak, 0, 1));
+                    height: parent.height * clamp(root.ch.peak, 0, 1);
+                    border-radius: 2px;
+                    background: root.ch.peak > 0.95 ? T.led-red : root.ch.peak > 0.8 ? T.led-yellow : T.led-green;
+                }
+            }
+            // fader cap
+            Rectangle {
+                x: (parent.width - 34px) / 2 - (root.ch.meter ? 6px : 0px);
+                y: (1 - clamp(root.ch.pos, 0, 1)) * track.travel;
+                width: 34px;
+                height: track.thumb;
+                border-radius: 3px;
+                background: @linear-gradient(180deg, #4A4E57 0%, #2B2E35 100%);
+                border-width: 1px;
+                border-color: fta.pressed || fta.has-hover ? root.hue : #ffffff26;
+                Rectangle {
+                    y: (parent.height - 2px) / 2;
+                    height: 2px;
+                    x: 5px;
+                    width: parent.width - 10px;
+                    background: root.ch.mute ? T.text-3 : root.hue;
+                }
+            }
+            fta := TouchArea {
+                mouse-cursor: ns-resize;
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                        root.moved(clamp(1 - (self.mouse-y - track.thumb / 2) / track.travel, 0, 1));
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        root.moved(clamp(1 - (self.mouse-y - track.thumb / 2) / track.travel, 0, 1));
+                    }
+                }
+                double-clicked => { root.reset(); }
+                scroll-event(e) => {
+                    root.moved(clamp(root.ch.pos + (e.delta-y > 0 ? 0.02 : -0.02), 0, 1));
+                    accept
+                }
+            }
+        }
+        Rectangle {
+            height: 24px;
+            border-radius: 5px;
+            background: root.ch.mute ? T.led-red.with-alpha(0.2) : mta.has-hover ? T.hover : T.panel-hi;
+            border-width: 1px;
+            border-color: root.ch.mute ? T.led-red.with-alpha(0.6) : #ffffff0d;
+            Text {
+                text: "M";
+                color: root.ch.mute ? T.led-red : T.text-2;
+                font-family: T.display;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            mta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.mute(); }
+            }
+        }
+    }
+}
+
+/// One step of the drum grid.
+component Cell inherits Rectangle {
+    in property <int> v;
+    in property <bool> now;
+    in property <bool> beat;
+    in property <bool> edit;
+    callback cycle;
+    callback clear;
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 4px;
+    background: v == 3 ? T.accent : v == 2 ? T.accent.with-alpha(0.62) : v == 1 ? T.accent.with-alpha(0.26)
+        : ta.has-hover && edit ? T.hover : beat ? #ffffff10 : #ffffff07;
+    border-width: now ? 2px : 1px;
+    border-color: now ? T.text : v > 0 ? T.accent.with-alpha(0.7) : #ffffff0a;
+    ta := TouchArea {
+        enabled: root.edit;
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                if e.button == PointerEventButton.left {
+                    root.cycle();
+                } else if e.button == PointerEventButton.right {
+                    root.clear();
+                }
+            }
+        }
+    }
+}
+
+export component PracticePage inherits VerticalLayout {
+    in property <bool> engine;
+    // looper: 0 empty, 1 rec, 2 play, 3 dub, 4 stopped
+    in property <int> loop-state;
+    in property <float> loop-progress;
+    in property <string> loop-time;
+    /// looper request on hold: 0 none, 1 waiting for the bar line, 2 counting in
+    in property <int> loop-wait;
+    in property <bool> drum-on;
+    /// 0..14 presets, 15 the user groove (`user-slot`)
+    in property <int> drum-pattern;
+    /// preset names, split over the two chip rows (0..7, 8..14)
+    in property <[string]> groove-names;
+    in property <[string]> groove-names-b;
+    in property <int> user-slot;
+    in property <int> user-len: 16;
+    in property <int> bpm: 100;
+    in property <int> drum-step;
+    in property <int> bar-len: 16;
+    /// steps per beat lamp, steps per accent group
+    in property <int> beat-steps: 4;
+    in property <int> bar-group: 16;
+    in property <int> time-sig;
+    in property <bool> count-in: true;
+    in property <bool> loop-sync: true;
+    in property <bool> trainer-on;
+    in property <int> trainer-step: 5;
+    in property <int> trainer-bars: 4;
+    in property <int> trainer-target: 160;
+    in property <[DrumRow]> drum-rows;
+    in property <[MixCh]> mix-bus;
+    in property <[MixCh]> mix-kit;
+    // kit feel: tune −6..6 st, decay 40..200 %, swing / humanise 0..100 %, fills 0..3
+    in property <int> kit-tune;
+    in property <int> kit-decay: 100;
+    in property <int> kit-swing;
+    in property <int> kit-human: 30;
+    in property <int> kit-fills: 2;
+    in property <string> ir-name;
+    in property <string> di-name;
+    callback loop-action(int);
+    callback drum-toggled(bool);
+    callback drum-pattern-picked(int);
+    callback user-slot-picked(int);
+    callback user-len-picked(int);
+    /// copy the shown preset into the current user slot and play it
+    callback user-copy();
+    callback user-clear();
+    /// row, step, value (−1 cycles rest → normal → accent → ghost → rest)
+    callback drum-cell(int, int, int);
+    callback bpm-changed(int);
+    callback tap();
+    callback time-sig-picked(int);
+    callback count-in-toggled(bool);
+    callback loop-sync-toggled(bool);
+    callback trainer-toggled(bool);
+    callback trainer-set(int, int, int);
+    /// channel (bus 0..2, kit 3..8), fader 0..1
+    callback mix-set(int, float);
+    callback mix-mute(int);
+    callback mix-reset(int);
+    /// 0 tune, 1 decay, 2 swing, 3 humanise, 4 fills
+    callback kit-set(int, int);
+    callback load-ir(string);
+    callback load-di(string);
+    callback engine-request();
+
+    property <bool> user: drum-pattern >= 15;
+    property <int> beats: max(1, floor(bar-len / max(1, beat-steps)));
+    property <int> beat-now: floor(drum-step / max(1, beat-steps));
+    property <color> loop-c: loop-state == 1 || loop-wait > 0 ? T.led-red : loop-state == 3 ? T.led-yellow : loop-state == 2 ? T.led-green : T.text-3;
+
+    padding-top: 6px;
+    spacing: 14px;
+
+    // ---------------------------------------------------------------- header
+    HorizontalLayout {
+        height: 44px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            Text {
+                text: "Practice";
+                color: T.text;
+                font-family: T.display;
+                font-size: 24px;
+                font-weight: 700;
+            }
+            Text {
+                text: "Drums, metronome, looper and speed trainer, mixed with your guitar.";
+                color: T.text-2;
+                font-size: 12.5px;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if !engine: HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout { alignment: center; Lamp { size: 9px; c: T.led-yellow; lit: false; } }
+            Text {
+                text: T.hw ? "Practice tools run on the PC engine. Settings are kept." : "Audio engine stopped. Settings are kept.";
+                color: T.text-2;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: sw.preferred-width + 24px;
+                    height: 30px;
+                    border-radius: 7px;
+                    background: swa.has-hover ? T.cyan.with-alpha(0.22) : T.cyan.with-alpha(0.12);
+                    border-width: 1px;
+                    border-color: T.cyan.with-alpha(0.45);
+                    sw := Text {
+                        text: T.hw ? "Switch to PC" : "Start audio";
+                        color: T.cyan;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+                    swa := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.engine-request(); }
+                    }
+                }
+            }
+        }
+        // .wav loaders: cabinet IR and DI loop
+        if engine: HorizontalLayout {
+            horizontal-stretch: 1;
+            max-width: 640px;
+            spacing: 6px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 30px;
+                    border-radius: T.r;
+                    background: T.well;
+                    border-width: 1px;
+                    border-color: path.has-focus ? T.accent-lo : T.line;
+                    path := TextInput {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        color: T.text;
+                        font-size: 11px;
+                        single-line: true;
+                        vertical-alignment: center;
+                    }
+                    if path.text == "" && !path.has-focus: Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        text: "Cab: " + root.ir-name + "  ·  DI: " + root.di-name + "  —  paste a .wav path";
+                        color: T.text-3;
+                        font-size: 11px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            VerticalLayout { alignment: center; Key { text: "LOAD IR"; clicked => { root.load-ir(path.text); } } }
+            VerticalLayout { alignment: center; Key { text: "LOAD DI"; clicked => { root.load-di(path.text); } } }
+        }
+    }
+
+    // ---------------------------------------------------------------- tempo | looper | trainer
+    HorizontalLayout {
+        spacing: 14px;
+        min-height: 206px;
+        max-height: 206px;
+
+        // -------- tempo + metronome
+        Card {
+            horizontal-stretch: 5;
+            min-width: 380px;
+            title: "TEMPO";
+            note: root.drum-pattern == 0 ? "metronome " + ["4/4", "3/4", "6/8"][root.time-sig] : root.bar-len + " steps";
+            glow: root.drum-on ? T.accent : transparent;
+            HorizontalLayout {
+                spacing: 12px;
+                // the big number: scroll or drag up / down
+                Rectangle {
+                    width: 150px;
+                    border-radius: 10px;
+                    background: T.well;
+                    border-width: 1px;
+                    border-color: root.trainer-on && root.drum-on ? T.accent-lo : T.line;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 0px;
+                        Text {
+                            text: root.bpm;
+                            color: root.trainer-on && root.drum-on ? T.accent-hi : T.text;
+                            font-family: T.mono;
+                            font-size: 50px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                        }
+                        Caption { text: "BPM"; horizontal-alignment: center; }
+                    }
+                    bta := TouchArea {
+                        mouse-cursor: ns-resize;
+                        property <length> start-y;
+                        property <int> start-bpm;
+                        pointer-event(e) => {
+                            if e.kind == PointerEventKind.down {
+                                self.start-y = self.mouse-y;
+                                self.start-bpm = root.bpm;
+                            }
+                        }
+                        moved => {
+                            if self.pressed {
+                                root.bpm-changed(self.start-bpm + round((self.start-y - self.mouse-y) / 4px));
+                            }
+                        }
+                        scroll-event(e) => {
+                            root.bpm-changed(root.bpm + (e.delta-y > 0 ? 1 : -1));
+                            accept
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Key { text: "−5"; horizontal-stretch: 1; clicked => { root.bpm-changed(root.bpm - 5); } }
+                        Key { text: "−1"; horizontal-stretch: 1; clicked => { root.bpm-changed(root.bpm - 1); } }
+                        Key { text: "+1"; horizontal-stretch: 1; clicked => { root.bpm-changed(root.bpm + 1); } }
+                        Key { text: "+5"; horizontal-stretch: 1; clicked => { root.bpm-changed(root.bpm + 5); } }
+                    }
+                    Key {
+                        text: "TAP";
+                        h: 36px;
+                        fs: 14px;
+                        clicked => { root.tap(); }
+                    }
+                    // beat lamps: the downbeat (and the 6/8 middle) in the accent colour
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for b in root.beats: Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 11px;
+                            property <bool> big: mod(b * root.beat-steps, root.bar-group) == 0;
+                            property <bool> on: root.drum-on && b == root.beat-now;
+                            background: on ? (big ? T.accent : T.text) : T.well;
+                            border-width: 1px;
+                            border-color: big ? T.accent.with-alpha(0.6) : T.line-hi;
+                            drop-shadow-blur: on ? 10px : 0px;
+                            drop-shadow-color: (big ? T.accent : T.text).with-alpha(0.5);
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Key {
+                    text: root.drum-on ? "■  STOP" : "▶  START";
+                    active: root.drum-on;
+                    lit: T.led-green;
+                    horizontal-stretch: 1;
+                    h: 34px;
+                    fs: 13px;
+                    enabled: root.engine;
+                    clicked => { root.drum-toggled(!root.drum-on); }
+                }
+                for t[i] in ["4/4", "3/4", "6/8"]: Key {
+                    text: t;
+                    h: 34px;
+                    active: i == root.time-sig && root.drum-pattern == 0;
+                    enabled: root.drum-pattern == 0;
+                    clicked => { root.time-sig-picked(i); }
+                }
+                Key {
+                    text: "COUNT-IN";
+                    h: 34px;
+                    active: root.count-in;
+                    clicked => { root.count-in-toggled(!root.count-in); }
+                }
+                Key {
+                    text: "SYNC";
+                    h: 34px;
+                    active: root.loop-sync;
+                    clicked => { root.loop-sync-toggled(!root.loop-sync); }
+                }
+            }
+        }
+
+        // -------- looper
+        Card {
+            horizontal-stretch: 4;
+            min-width: 300px;
+            title: "LOOPER";
+            note: root.loop-state == 0 ? "60 s" : root.loop-time;
+            glow: root.loop-state == 0 && root.loop-wait == 0 ? transparent : root.loop-c;
+            // one-button looper: REC → PLAY → DUB → PLAY …
+            Rectangle {
+                height: 58px;
+                border-radius: 10px;
+                property <bool> hot: root.loop-state == 1 || root.loop-state == 3 || root.loop-wait > 0;
+                background: hot ? root.loop-c.with-alpha(0.22) : lta.pressed ? T.well : lta.has-hover ? T.hover : T.panel-hi;
+                border-width: 1px;
+                border-color: hot ? root.loop-c : T.line-hi;
+                opacity: root.engine ? 1 : 0.45;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 12px;
+                    VerticalLayout { alignment: center; Lamp { size: 14px; c: root.loop-c; lit: (root.loop-state != 0 && root.loop-state != 4) || root.loop-wait > 0; } }
+                    Text {
+                        text: root.loop-wait == 2 ? "COUNT-IN…" : root.loop-wait == 1 ? "WAITING FOR BAR…"
+                            : root.loop-state == 0 ? "●  RECORD" : root.loop-state == 1 || root.loop-state == 3 ? "▶  PLAY" : "●  OVERDUB";
+                        color: T.text;
+                        font-family: T.display;
+                        font-size: 17px;
+                        font-weight: 700;
+                        letter-spacing: 1.2px;
+                        vertical-alignment: center;
+                    }
+                }
+                lta := TouchArea {
+                    enabled: root.engine;
+                    mouse-cursor: pointer;
+                    clicked => { root.loop-action(0); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                Key { text: "■ STOP"; horizontal-stretch: 1; enabled: root.engine && (root.loop-state != 0 || root.loop-wait > 0); clicked => { root.loop-action(1); } }
+                Key { text: "▶ PLAY"; horizontal-stretch: 1; enabled: root.engine && root.loop-state == 4; clicked => { root.loop-action(2); } }
+                Key { text: "↶ UNDO"; horizontal-stretch: 1; enabled: root.engine && root.loop-state >= 2; clicked => { root.loop-action(3); } }
+                Key { text: "✕ CLEAR"; horizontal-stretch: 1; lit: T.led-red; enabled: root.engine && (root.loop-state != 0 || root.loop-wait > 0); clicked => { root.loop-action(4); } }
+            }
+            VerticalLayout {
+                spacing: 6px;
+                Rectangle {
+                    height: 10px;
+                    border-radius: 3px;
+                    background: T.well;
+                    border-width: 1px;
+                    border-color: T.line;
+                    Rectangle {
+                        x: 1px;
+                        y: 1px;
+                        height: parent.height - 2px;
+                        width: (parent.width - 2px) * clamp(root.loop-progress, 0, 1);
+                        border-radius: 2px;
+                        background: root.loop-state == 1 ? T.led-red : root.loop-state == 3 ? T.led-yellow : T.accent;
+                    }
+                }
+                Caption {
+                    text: ["Empty: press RECORD (or Space)", "Recording the processed guitar", "Playing", "Overdubbing a layer", "Stopped"][root.loop-state]
+                        + (root.loop-sync && root.drum-on ? " · locked to the bar" : root.count-in && !root.drum-on ? " · one bar count-in" : "");
+                    overflow: elide;
+                }
+            }
+        }
+
+        // -------- speed trainer
+        Card {
+            horizontal-stretch: 3;
+            min-width: 250px;
+            title: "SPEED TRAINER";
+            note: root.trainer-on ? root.bpm + " → " + root.trainer-target : "off";
+            glow: root.trainer-on ? T.amber : transparent;
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Raise the tempo while the drums play.";
+                    color: T.text-3;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Switch {
+                        on: root.trainer-on;
+                        hue: T.amber;
+                        toggled => { root.trainer-toggled(!root.trainer-on); }
+                    }
+                }
+            }
+            Stepper {
+                label: "Step";
+                value: "+" + root.trainer-step + " BPM";
+                down => { root.trainer-set(max(1, root.trainer-step - 1), root.trainer-bars, root.trainer-target); }
+                up => { root.trainer-set(min(10, root.trainer-step + 1), root.trainer-bars, root.trainer-target); }
+            }
+            Stepper {
+                label: "Every";
+                value: root.trainer-bars + (root.trainer-bars == 1 ? " bar" : " bars");
+                down => { root.trainer-set(root.trainer-step, max(1, root.trainer-bars - 1), root.trainer-target); }
+                up => { root.trainer-set(root.trainer-step, min(8, root.trainer-bars + 1), root.trainer-target); }
+            }
+            Stepper {
+                label: "Up to";
+                value: root.trainer-target + " BPM";
+                down => { root.trainer-set(root.trainer-step, root.trainer-bars, root.trainer-target - 5); }
+                up => { root.trainer-set(root.trainer-step, root.trainer-bars, root.trainer-target + 5); }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- drums | mixer
+    HorizontalLayout {
+        vertical-stretch: 1;
+        spacing: 14px;
+
+        // -------- drum machine
+        Card {
+            horizontal-stretch: 1;
+            min-width: 560px;
+            title: "DRUM MACHINE";
+            note: root.user ? "USER " + (root.user-slot + 1) + " · click a step: normal → accent → ghost · right-click clears"
+                : (root.drum-pattern < 8 ? root.groove-names[root.drum-pattern] : root.groove-names-b[root.drum-pattern - 8]) + " · copy it to a user slot to edit";
+            // grooves: presets, then the four user slots
+            VerticalLayout {
+                spacing: 4px;
+                HorizontalLayout {
+                    spacing: 4px;
+                    for g[i] in root.groove-names: Key {
+                        horizontal-stretch: 1;
+                        text: g;
+                        fs: 11px;
+                        h: 28px;
+                        active: i == root.drum-pattern;
+                        clicked => { root.drum-pattern-picked(i); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    for g[i] in root.groove-names-b: Key {
+                        horizontal-stretch: 1;
+                        text: g;
+                        fs: 11px;
+                        h: 28px;
+                        active: 8 + i == root.drum-pattern;
+                        clicked => { root.drum-pattern-picked(8 + i); }
+                    }
+                    Rectangle { width: 6px; }
+                    for u in 4: Key {
+                        text: "U" + (u + 1);
+                        fs: 11px;
+                        h: 28px;
+                        lit: T.amber;
+                        active: root.user && u == root.user-slot;
+                        clicked => { root.user-slot-picked(u); }
+                    }
+                }
+            }
+            // step grid
+            VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 3px;
+                HorizontalLayout {
+                    spacing: 3px;
+                    Rectangle { width: 64px; }
+                    for s in root.bar-len: Text {
+                        horizontal-stretch: 1;
+                        min-width: 14px;
+                        text: mod(s, root.beat-steps) == 0 ? (floor(s / root.beat-steps) + 1) : "";
+                        color: root.drum-on && s == root.drum-step ? T.text : T.text-3;
+                        font-family: T.mono;
+                        font-size: 10px;
+                        horizontal-alignment: center;
+                    }
+                }
+                for row[r] in root.drum-rows: HorizontalLayout {
+                    vertical-stretch: 1;
+                    spacing: 3px;
+                    Text {
+                        width: 64px;
+                        text: row.name;
+                        color: T.text-2;
+                        font-size: 11px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    for c[s] in row.cells: Cell {
+                        horizontal-stretch: 1;
+                        v: c;
+                        now: root.drum-on && s == root.drum-step;
+                        beat: mod(s, root.beat-steps) == 0;
+                        edit: root.user;
+                        opacity: root.user ? 1 : 0.8;
+                        cycle => { root.drum-cell(r, s, -1); }
+                        clear => { root.drum-cell(r, s, 0); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                if !root.user: Key {
+                    text: "EDIT AS U" + (root.user-slot + 1);
+                    lit: T.amber;
+                    clicked => { root.user-copy(); }
+                }
+                if root.user: Key { text: "12 STEPS"; active: root.user-len == 12; clicked => { root.user-len-picked(12); } }
+                if root.user: Key { text: "16 STEPS"; active: root.user-len == 16; clicked => { root.user-len-picked(16); } }
+                if root.user: Key { text: "CLEAR"; lit: T.led-red; clicked => { root.user-clear(); } }
+                Rectangle { horizontal-stretch: 1; }
+                Caption { text: "FILLS"; }
+                for f[i] in ["OFF", "8", "4", "2"]: Key {
+                    text: f;
+                    active: i == root.kit-fills;
+                    clicked => { root.kit-set(4, i); }
+                }
+                Caption { text: "bars"; }
+            }
+            // kit feel
+            HorizontalLayout {
+                spacing: 18px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+                    HFader {
+                        label: "TUNE";
+                        value: (root.kit-tune + 6) / 12;
+                        home: 0.5;
+                        centred: true;
+                        text: (root.kit-tune > 0 ? "+" : "") + root.kit-tune + " st";
+                        moved(v) => { root.kit-set(0, round(v * 12 - 6)); }
+                    }
+                    HFader {
+                        label: "DECAY";
+                        value: (root.kit-decay - 40) / 160;
+                        home: 0.375;
+                        text: root.kit-decay + " %";
+                        moved(v) => { root.kit-set(1, round(40 + v * 160)); }
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+                    HFader {
+                        label: "SWING";
+                        value: root.kit-swing / 100;
+                        home: 0;
+                        text: root.kit-swing + " %";
+                        moved(v) => { root.kit-set(2, round(v * 100)); }
+                    }
+                    HFader {
+                        label: "HUMANISE";
+                        value: root.kit-human / 100;
+                        home: 0.3;
+                        text: root.kit-human + " %";
+                        moved(v) => { root.kit-set(3, round(v * 100)); }
+                    }
+                }
+            }
+        }
+
+        // -------- mixer
+        Card {
+            horizontal-stretch: 0;
+            title: "MIXER";
+            note: "double-click: 0 dB";
+            HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 6px;
+                for ch[i] in root.mix-bus: Strip {
+                    ch: ch;
+                    hue: i == 0 ? T.accent : i == 1 ? T.led-yellow : T.led-green;
+                    moved(v) => { root.mix-set(i, v); }
+                    reset => { root.mix-reset(i); }
+                    mute => { root.mix-mute(i); }
+                }
+                Rectangle {
+                    width: 13px;
+                    Rectangle { x: 6px; width: 1px; background: T.line-hi; }
+                }
+                for ch[i] in root.mix-kit: Strip {
+                    ch: ch;
+                    hue: T.led-green;
+                    moved(v) => { root.mix-set(3 + i, v); }
+                    reset => { root.mix-reset(3 + i); }
+                    mute => { root.mix-mute(3 + i); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Silk { width: 3 * 54px + 12px; text: "BUS"; horizontal-alignment: center; }
+                Rectangle { width: 13px; }
+                Silk { horizontal-stretch: 1; text: "DRUM KIT"; horizontal-alignment: center; }
+            }
+        }
+    }
+}

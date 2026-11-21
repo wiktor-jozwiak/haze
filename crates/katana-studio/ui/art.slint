@@ -209,7 +209,7 @@ export component EmptyState inherits VerticalLayout {
     Text {
         text: root.title;
         horizontal-alignment: center;
-        color: root.on-paper ? #191715 : T.text;
+        color: T.text;
         font-size: compact ? 15px : 18px;
         font-weight: 700;
     }
@@ -220,7 +220,7 @@ export component EmptyState inherits VerticalLayout {
             text: root.body;
             horizontal-alignment: center;
             wrap: word-wrap;
-            color: root.on-paper ? #5E574B : T.text-2;
+            color: T.text-2;
             font-size: compact ? 12.5px : 13.5px;
         }
     }

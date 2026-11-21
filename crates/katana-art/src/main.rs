@@ -9,6 +9,8 @@
 //!
 //! usage: cargo run -p katana-art --release -- <out-dir>
 
+mod tex;
+
 use std::f32::consts::PI;
 use std::path::Path;
 
@@ -480,6 +482,11 @@ fn pedal_overlay(dir: &Path, w: usize, h: usize, rad: f32, groove: f32) {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("tex") {
+        let out = std::env::args().nth(2).unwrap_or_else(|| "crates/katana-studio/ui/tex".into());
+        std::fs::create_dir_all(&out).unwrap();
+        return tex::run(Path::new(&out));
+    }
     let out = std::env::args().nth(1).unwrap_or_else(|| "crates/katana-studio/ui/art".into());
     let dir = Path::new(&out);
     std::fs::create_dir_all(dir).unwrap();

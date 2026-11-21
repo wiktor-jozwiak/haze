@@ -29,8 +29,9 @@ export component LibraryPage inherits VerticalLayout {
     callback tone-add(int);
 
     padding-top: 6px;
-    spacing: 14px;
-    HorizontalLayout {
+    spacing: 12px;
+    // row 1: scope, search, then the few page actions (rare ones behind "…")
+    bar := HorizontalLayout {
         height: 36px;
         spacing: 10px;
         Well {
@@ -55,39 +56,13 @@ export component LibraryPage inherits VerticalLayout {
             }
         }
         SearchField {
-            width: 280px;
+            width: 320px;
             height: 36px;
             text <=> root.query;
             edited(q) => { search(q); }
         }
-        // style chips, then the user's own #tags; scrolls sideways instead of pushing the toolbar
-        Flickable {
-            horizontal-stretch: 1;
-            content-width: chips.preferred-width;
-            interactive: chips.preferred-width > self.width;
-            chips := HorizontalLayout {
-                spacing: 6px;
-                for t in [{ id: "", n: "All tones" }, { id: "clean", n: "Clean" }, { id: "crunch", n: "Crunch" },
-                          { id: "lead", n: "Lead" }, { id: "hi-gain", n: "Hi-Gain" }, { id: "ambient", n: "Ambient" }]: VerticalLayout {
-                    alignment: center;
-                    Chip {
-                        text: t.n;
-                        active: t.id == tag;
-                        clicked => { tag-picked(t.id); }
-                    }
-                }
-                if user-tags.length > 0: Rectangle { width: 6px; }
-                for u in user-tags: VerticalLayout {
-                    alignment: center;
-                    Chip {
-                        text: "#" + u;
-                        active: "#" + u == tag;
-                        clicked => { tag-picked("#" + u); }
-                    }
-                }
-            }
-        }
-        ToolBtn {
+        Rectangle { horizontal-stretch: 1; }
+        sort-btn := ToolBtn {
             text: ["Sort: Name", "Sort: Recent", "Sort: Amp"][sort];
             icon: Icons.chevron-down;
             enabled: nav-selected == "all" || nav-selected == "fav";
@@ -98,20 +73,49 @@ export component LibraryPage inherits VerticalLayout {
             icon: Icons.import;
             clicked => { import-request(); }
         }
-        ToolBtn {
-            text: "Back up amp";
-            icon: Icons.backup;
-            enabled: connected;
-            clicked => { backup-amp(); }
+        more-btn := ToolBtn {
+            icon: Icons.more;
+            tip: "Back up amp, export list";
+            clicked => { more-menu.show(); }
         }
-        ToolBtn {
-            text: "Export";
-            icon: Icons.export;
-            clicked => { export-list(); }
+    }
+    // row 2: style chips, the user's #tags, result count
+    HorizontalLayout {
+        height: 28px;
+        spacing: 12px;
+        Flickable {
+            horizontal-stretch: 1;
+            content-width: chips.preferred-width;
+            interactive: chips.preferred-width > self.width;
+            chips := HorizontalLayout {
+                spacing: 6px;
+                for t in [{ id: "", n: "All tones" }, { id: "clean", n: "Clean" }, { id: "crunch", n: "Crunch" },
+                          { id: "lead", n: "Lead" }, { id: "hi-gain", n: "Hi-Gain" }, { id: "ambient", n: "Ambient" }]: Chip {
+                    text: t.n;
+                    active: t.id == tag;
+                    clicked => { tag-picked(t.id); }
+                }
+                if user-tags.length > 0: Rectangle {
+                    width: 13px;
+                    Rectangle { x: 6px; y: 6px; width: 1px; height: parent.height - 12px; background: #ffffff14; }
+                }
+                for u in user-tags: Chip {
+                    text: "#" + u;
+                    active: "#" + u == tag;
+                    clicked => { tag-picked("#" + u); }
+                }
+            }
+        }
+        Text {
+            text: tones.length == 1 ? "1 preset" : tones.length + " presets";
+            color: T.text-3;
+            font-size: 12px;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
         }
     }
     sort-menu := PopupWindow {
-        x: root.width - 470px;
+        x: sort-btn.x;
         y: 44px;
         width: 210px;
         height: 3 * 36px + 12px;
@@ -121,6 +125,26 @@ export component LibraryPage inherits VerticalLayout {
                 for o[i] in ["Name", "Recently edited", "Amp type"]: MenuItem {
                     text: (i == sort ? "✓  " : "     ") + o;
                     clicked => { sort-picked(i); }
+                }
+            }
+        }
+    }
+    more-menu := PopupWindow {
+        x: more-btn.x + more-btn.width - 220px;
+        y: 44px;
+        width: 220px;
+        height: 2 * 36px + 12px;
+        Menu {
+            VerticalLayout {
+                padding: 6px;
+                MenuItem {
+                    text: "Back up amp channels";
+                    enabled: connected;
+                    clicked => { backup-amp(); }
+                }
+                MenuItem {
+                    text: "Export list…";
+                    clicked => { export-list(); }
                 }
             }
         }

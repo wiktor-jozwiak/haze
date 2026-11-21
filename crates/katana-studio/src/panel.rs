@@ -100,7 +100,7 @@ impl Panel {
                 knob_names: &["PEDAL POS", "EFFECT LEVEL", "PITCH"],
             },
             NodeDef {
-                node: Booster, title: "BOOSTER", hue: rgb(0xd8742a),
+                node: Booster, title: "BOOSTER", hue: rgb(0xc8407e),
                 sw: Some(p("Patch_0", "PRM_ODDS_SW")), ty: Some(p("Patch_0", "PRM_ODDS_TYPE")),
                 variant: Some(Variant { asgn: 4, sel: 25, led: 13 }),
                 sections: vec![sec("BOOSTER", "Patch_0", 0..15, Filter::None)],
@@ -124,7 +124,8 @@ impl Panel {
                 sw: None, ty: None, variant: None,
                 sections: vec![
                     sec("AMP", "Patch_0", 16..48, Filter::None),
-                    sec("SOLO", "Patch_Mk2V2", 0..999, Filter::None),
+                    // solo EQ + solo delay (MkII V2): engage with the SOLO switch on the Amp tab
+                    sec("SOLO FX", "Patch_Mk2V2", 0..999, Filter::None),
                     sec("CONTOUR", "Contour(1)", 0..999, Filter::None),
                     sec("GLOBAL", "Patch_1", 38..999, Filter::None),
                 ],

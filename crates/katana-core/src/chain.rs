@@ -136,12 +136,70 @@ impl Routing {
     }
 }
 
+/// A named chain layout the user can apply in one click. Only the order changes: which
+/// blocks are on and how they sound stays as it is.
+pub struct ChainPreset {
+    pub name: &'static str,
+    pub blurb: &'static str,
+    pub routing: Routing,
+}
+
+const fn rt(pattern: u8, eq_post: bool, pfx_post: bool, sr_post_rev: bool) -> Routing {
+    Routing { pattern, sr_post_rev, eq_post, pfx_post }
+}
+
+/// Ready-made orders, all of them patterns the Katana runs natively.
+pub const CHAIN_PRESETS: [ChainPreset; 6] = [
+    ChainPreset {
+        name: "Standard",
+        blurb: "Wah and drive into the amp, modulation, delay and reverb after it",
+        routing: rt(0, false, false, false),
+    },
+    ChainPreset {
+        name: "Modern high gain",
+        blurb: "EQ after the amp to tighten and shape the distorted tone",
+        routing: rt(0, true, false, false),
+    },
+    ChainPreset {
+        name: "Compressor first",
+        blurb: "Mod slot (compressor) before the booster, for even, squashed drive",
+        routing: rt(4, false, false, false),
+    },
+    ChainPreset {
+        name: "Vintage front end",
+        blurb: "Booster and modulation both hit the front of the amp",
+        routing: rt(1, false, false, false),
+    },
+    ChainPreset {
+        name: "Pedal platform",
+        blurb: "Every effect before the amp, like a pedalboard into a clean amp",
+        routing: rt(3, false, false, false),
+    },
+    ChainPreset {
+        name: "Loop at the end",
+        blurb: "FX loop after the reverb, for external delays and loopers",
+        routing: rt(0, false, false, true),
+    },
+];
+
 pub fn movable(n: Node) -> bool {
     matches!(n, PedalFx | Booster | Mod | Eq | Amp | SendReturn)
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn chain_presets_are_valid_and_distinct() {
+        for (i, p) in super::CHAIN_PRESETS.iter().enumerate() {
+            let back = Routing::from_order(&p.routing.layout());
+            assert_eq!(back, Some(p.routing), "{} does not round-trip", p.name);
+            for q in &super::CHAIN_PRESETS[i + 1..] {
+                assert_ne!(p.routing, q.routing, "{} == {}", p.name, q.name);
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

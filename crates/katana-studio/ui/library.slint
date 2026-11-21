@@ -44,19 +44,15 @@ export component Chip inherits Rectangle {
     in property <bool> active;
     in property <color> dot: transparent;
     callback clicked;
-    width: row.preferred-width + 24px + (active ? 15px : 0);
+    width: row.preferred-width + 24px;
     height: 28px;
-    border-radius: 6px;
-    background: active ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%) : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    border-radius: 14px;
+    background: active ? T.accent.with-alpha(0.14) : ta.has-hover ? #ffffff0d : transparent;
     border-width: 1px;
-    border-color: #000000c0;
+    border-color: active ? T.accent.with-alpha(0.45) : #ffffff10;
     row := HorizontalLayout {
         x: 12px;
         spacing: 7px;
-        if root.active: VerticalLayout {
-            alignment: center;
-            Lamp { size: 8px; lit: true; }
-        }
         if dot != transparent: VerticalLayout {
             alignment: center;
             Rectangle {
@@ -68,11 +64,10 @@ export component Chip inherits Rectangle {
         }
         Text {
             text: root.text;
-            color: active ? T.silk : ta.has-hover ? T.silk : T.silk-2;
+            color: active ? T.accent-hi : ta.has-hover ? T.text : T.text-2;
             font-family: T.display;
-            font-size: 13.5px;
-            font-weight: 700;
-            letter-spacing: 0.4px;
+            font-size: 12.5px;
+            font-weight: 600;
             vertical-alignment: center;
         }
     }
@@ -95,9 +90,9 @@ export component FxSig inherits HorizontalLayout {
         width: labels ? row.preferred-width + root.h * 0.7 : root.h + 2px;
         height: root.h;
         border-radius: root.h * 0.28;
-        background: on ? c.with-alpha(0.16) : #1C1F25;
+        background: on ? c.with-alpha(0.16) : transparent;
         border-width: 1px;
-        border-color: on ? c.with-alpha(0.55) : #262A31;
+        border-color: on ? c.with-alpha(0.55) : #ffffff0d;
         row := HorizontalLayout {
             alignment: center;
             spacing: root.h * 0.3;
@@ -109,7 +104,7 @@ export component FxSig inherits HorizontalLayout {
                     viewbox-width: 24;
                     viewbox-height: 24;
                     commands: Glyphs.path([2, 3, 7, 8, 10][i]);
-                    stroke: on ? c : #4A505B;
+                    stroke: on ? c : #3A3E46;
                     stroke-width: root.h >= 30px ? 2px : 1.6px;
                     fill: transparent;
                 }
@@ -125,8 +120,8 @@ export component FxSig inherits HorizontalLayout {
     }
 }
 
-/// One preset in the grid: name, amp, active effects and a five-block signature strip
-/// (Booster, Mod, FX, Delay, Reverb lit in their block colours).
+/// One preset in the grid. Three levels only: name, amp (dot in the drive colour), and the
+/// five-block effect strip. Index, effect names and actions stay out of the way until hover.
 export component PresetCard inherits Rectangle {
     in property <ToneRow> tone;
     in property <bool> selected;
@@ -134,15 +129,12 @@ export component PresetCard inherits Rectangle {
     callback opened;
     callback fav;
     callback add;
-    height: 118px;
-    border-radius: 10px;
-    background: root.hov ? @linear-gradient(180deg, #2A2826 0%, #1D1C1A 100%) : @linear-gradient(180deg, #232120 0%, #181716 100%);
-    border-width: selected ? 2px : 1px;
-    border-color: selected ? T.accent : #000000c0;
-    drop-shadow-blur: selected ? 14px : 6px;
-    drop-shadow-offset-y: 3px;
-    drop-shadow-color: selected ? T.accent.with-alpha(0.25) : #00000090;
-    Rectangle { x: 8px; y: 1px; width: parent.width - 16px; height: 1px; background: #ffffff17; }
+    property <bool> hov: ta.has-hover || fta.has-hover || ata.has-hover;
+    height: 96px;
+    border-radius: 12px;
+    background: root.hov ? T.panel-hi : T.panel;
+    border-width: selected ? 1.5px : 1px;
+    border-color: selected ? T.accent : root.hov ? #ffffff1a : #ffffff0d;
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -151,51 +143,44 @@ export component PresetCard inherits Rectangle {
     Text {
         x: 16px;
         y: 14px;
-        width: parent.width - 56px;
+        width: parent.width - 84px;
         text: tone.name;
         overflow: elide;
         color: T.text;
         font-family: T.display;
-        font-size: 18px;
+        font-size: 15.5px;
         font-weight: 700;
     }
-    Text {
+    // amp: drive dot + model, one quiet line
+    Rectangle {
         x: 16px;
+        y: 42px;
+        width: 7px;
+        height: 7px;
+        border-radius: 3.5px;
+        background: T.drive(tone.drive);
+    }
+    Text {
+        x: 30px;
         y: 37px;
-        width: parent.width - 92px;
+        width: parent.width - 46px;
         text: tone.amp;
         overflow: elide;
-        color: T.text-2;
+        color: T.text-3;
         font-size: 12.5px;
     }
-    Text {
-        x: 16px;
-        y: 56px;
-        width: parent.width - 92px;
-        text: tone.fx == "" ? "No effects" : tone.fx;
-        overflow: elide;
-        color: T.text-3;
-        font-size: 11.5px;
-    }
-    AmpBadge {
-        x: parent.width - self.width - 16px;
-        y: 40px;
-        width: 44px;
-        drive: tone.drive;
-    }
-    // effect signature
     FxSig {
         x: 16px;
-        y: parent.height - 34px;
-        h: 20px;
+        y: parent.height - 32px;
+        h: 18px;
         leds: tone.leds;
     }
     if tone.live: Rectangle {
         x: parent.width - self.width - 14px;
-        y: parent.height - 34px;
+        y: parent.height - 32px;
         width: lt.preferred-width + 26px;
-        height: 20px;
-        border-radius: 10px;
+        height: 18px;
+        border-radius: 9px;
         background: T.led-red.with-alpha(0.14);
         Rectangle {
             x: 8px;
@@ -212,22 +197,20 @@ export component PresetCard inherits Rectangle {
             font-weight: 600;
         }
     }
-    if !tone.live: Text {
+    if !tone.live && root.hov: Text {
         x: parent.width - self.width - 16px;
-        y: parent.height - 32px;
-        text: root.hov ? "Double-click to edit" : "#" + tone.index;
+        y: parent.height - 30px;
+        text: "Double-click to edit";
         color: T.text-3;
-        font-family: root.hov ? T.display : T.mono;
         font-size: 11px;
     }
-    property <bool> hov: ta.has-hover || fta.has-hover || ata.has-hover;
     // add to a setlist (hover)
     Rectangle {
         visible: root.hov;
-        x: parent.width - 72px;
+        x: parent.width - 70px;
         y: 8px;
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
         border-radius: 8px;
         background: ata.has-hover ? T.hover : transparent;
         Icon {
@@ -243,10 +226,10 @@ export component PresetCard inherits Rectangle {
     // favourite star (always visible when set, on hover otherwise)
     Rectangle {
         visible: tone.fav || root.hov;
-        x: parent.width - 40px;
+        x: parent.width - 38px;
         y: 8px;
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
         border-radius: 8px;
         background: fta.has-hover ? T.hover : transparent;
         Icon {
@@ -262,7 +245,7 @@ export component PresetCard inherits Rectangle {
     }
     if ata.has-hover: Tip {
         x: parent.width - self.width - 8px;
-        y: 42px;
+        y: 40px;
         text: "Add to setlist";
     }
 }
@@ -274,8 +257,9 @@ export component LibraryGrid inherits Rectangle {
     callback opened(int);
     callback fav(int);
     callback add(int);
-    property <length> gap: 12px;
-    property <int> cols: Math.max(1, Math.floor((self.width - 10px + gap) / (240px + gap)));
+    property <length> gap: 14px;
+    // roomier cards: fewer, wider columns read faster than a dense wall
+    property <int> cols: Math.max(1, Math.floor((self.width - 10px + gap) / (270px + gap)));
 
     ListView {
         for r in Math.ceil(tones.length / cols): HorizontalLayout {
@@ -284,7 +268,7 @@ export component LibraryGrid inherits Rectangle {
             spacing: root.gap;
             for c in root.cols: Rectangle {
                 horizontal-stretch: 1;
-                height: 118px;
+                height: 96px;
                 if r * root.cols + c < tones.length: PresetCard {
                     tone: tones[r * root.cols + c];
                     selected: r * root.cols + c == selected-index;
@@ -373,7 +357,7 @@ component RowAction inherits Rectangle {
     Icon {
         d: root.icon;
         size: 16px;
-        tint: !enabled ? #B8AF9E : ta.has-hover ? (danger ? #B02A20 : #191715) : #5E574B;
+        tint: !enabled ? T.text-off : ta.has-hover ? (danger ? T.danger : T.text) : T.text-3;
     }
     ta := TouchArea {
         enabled: root.enabled;
@@ -397,23 +381,25 @@ export component SongRow inherits Rectangle {
     callback removed;
     height: 64px;
     border-radius: 4px;
-    background: ta.has-hover && !selected ? #0000000c : transparent;
+    background: ta.has-hover && !selected ? #ffffff08 : transparent;
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
         double-clicked => { root.opened(); }
     }
-    // highlighter stroke over the current song
+    // current song: accent-tinted row
     if selected: Rectangle {
         x: 8px;
         y: 10px;
         width: parent.width - 16px;
         height: parent.height - 20px;
         border-radius: 3px;
-        background: @linear-gradient(90deg, #FFE14D99 0%, #FFE14D80 85%, #FFE14D40 100%);
+        background: T.accent.with-alpha(0.12);
+        border-width: 1px;
+        border-color: T.accent.with-alpha(0.35);
     }
-    // ruled line
-    Rectangle { x: 8px; y: parent.height - 1px; width: parent.width - 16px; height: 1px; background: #4A7BB026; }
+    // row divider
+    Rectangle { x: 8px; y: parent.height - 1px; width: parent.width - 16px; height: 1px; background: #ffffff0a; }
     HorizontalLayout {
         padding-left: 18px;
         padding-right: 12px;
@@ -421,7 +407,7 @@ export component SongRow inherits Rectangle {
         Text {
             width: 34px;
             text: (number < 10 ? "0" : "") + number;
-            color: selected ? #2A2015 : #7A7264;
+            color: selected ? T.accent : T.text-3;
             font-family: T.mono;
             font-size: 17px;
             font-weight: 700;
@@ -436,7 +422,7 @@ export component SongRow inherits Rectangle {
                 Text {
                     text: tone.name.to-uppercase();
                     overflow: elide;
-                    color: #191715;
+                    color: T.text;
                     font-family: T.display;
                     font-size: 20px;
                     font-weight: 700;
@@ -470,7 +456,7 @@ export component SongRow inherits Rectangle {
             Text {
                 text: tone.fx != "" ? tone.amp + "  ·  " + tone.fx : tone.amp;
                 overflow: elide;
-                color: #5E574B;
+                color: T.text-2;
                 font-size: 12px;
             }
         }
@@ -666,7 +652,7 @@ export component StarterCard inherits Rectangle {
     border-radius: T.r-card;
     background: ta.has-hover ? @linear-gradient(180deg, #2A2826 0%, #1D1C1A 100%) : @linear-gradient(180deg, #232120 0%, #181716 100%);
     border-width: 1px;
-    border-color: #000000c0;
+    border-color: #ffffff12;
     drop-shadow-blur: 8px;
     drop-shadow-offset-y: 3px;
     drop-shadow-color: #00000090;

@@ -22,6 +22,9 @@ export struct Pedal {
     ink: color,
     movable: bool,
     is-amp: bool,
+    /// container slot (Booster, Mod, FX, Pedal FX): the effect type is the name people know,
+    /// so it goes big and the slot name becomes the small caption
+    type-first: bool,
     knobs: [PedalKnob],
     /// index into Glyphs (Panel.nodes order), used by the inspector header emblem
     kind: int,
@@ -158,7 +161,17 @@ export component PedalView inherits Rectangle {
     // two knobs spread a little wider than three
     property <length> kpitch: (root.width - 10px) / (root.nk == 2 ? 2.4 : 3);
     property <length> kx0: (root.width - root.nk * root.kpitch) / 2;
-    property <color> ink-2: p.ink.with-alpha(0.72);
+    // bypassed: enclosure loses most of its colour and the silkscreen fades, so on/off reads
+    // at a glance (not just a slightly darker box)
+    property <color> body-c: bypassed
+        ? hsv(p.hue.to-hsv().hue, p.hue.to-hsv().saturation * 0.25, p.hue.to-hsv().value * 0.6)
+        : p.hue;
+    property <color> ink-1: bypassed ? p.ink.with-alpha(0.62) : p.ink;
+    property <color> ink-2: p.ink.with-alpha(bypassed ? 0.52 : 0.72);
+    // mini-knob captions: 10.5px on a coloured box, so they get more contrast than the subtitle
+    property <color> ink-k: p.ink.with-alpha(bypassed ? 0.52 : 0.9);
+    // amp head legends: dark on the ivory Studio panel, white on the black Katana panel
+    property <color> amp-ink: T.katana ? #ECECEC : T.accent-ink;
     callback toggled;
     callback clicked;
     callback drag-start;
@@ -202,7 +215,7 @@ export component PedalView inherits Rectangle {
             drop-shadow-color: lifted ? #000000d0 : #000000b8;
             background: p.is-amp
                 ? @linear-gradient(180deg, #2C2E33 0%, #18191C 100%)
-                : @linear-gradient(165deg, p.hue.brighter(0.28) 0%, p.hue 38%, p.hue.darker(0.3) 100%);
+                : @linear-gradient(165deg, root.body-c.brighter(0.28) 0%, root.body-c 38%, root.body-c.darker(0.3) 100%);
         }
         // powder-coat grain
         Image {
@@ -217,7 +230,7 @@ export component PedalView inherits Rectangle {
         Rectangle {
             border-radius: 7px;
             border-width: 1px;
-            border-color: p.is-amp ? #3A3C42 : p.hue.darker(0.5);
+            border-color: p.is-amp ? #3A3C42 : root.body-c.darker(0.5);
         }
         Rectangle { x: 5px; y: 1px; width: parent.width - 10px; height: 1.5px; background: #ffffff55; }
         Rectangle { x: 1px; y: 6px; width: 1px; height: parent.height - 12px; background: #ffffff22; }
@@ -238,9 +251,22 @@ export component PedalView inherits Rectangle {
             width: parent.width - 10px;
             height: 68px;
             border-radius: 6px;
-            background: @linear-gradient(180deg, T.accent-hi 0%, T.accent 50%, T.accent.darker(0.2) 100%);
+            // ivory control panel: the amp stays neutral, its pilot lamp carries the engine mode
+            background: T.katana
+                ? @linear-gradient(180deg, #2A2A2B 0%, #1A1A1B 50%, #111112 100%)
+                : @linear-gradient(180deg, #EFE8D8 0%, #D6CDB8 50%, #B9AF98 100%);
             border-width: 1px;
             border-color: #00000050;
+            Rectangle {
+                x: parent.width - 13px;
+                y: 51px;
+                width: 7px;
+                height: 7px;
+                border-radius: 3.5px;
+                background: T.accent;
+                border-width: 1px;
+                border-color: #00000060;
+            }
         }
 
         // ------------------------------------------------ knobs + labels / values
@@ -264,8 +290,8 @@ export component PedalView inherits Rectangle {
                 text: root.hovered ? k.text : k.label;
                 horizontal-alignment: center;
                 overflow: elide;
-                color: p.is-amp ? T.accent-ink : root.ink-2;
-                font-family: T.display;
+                color: p.is-amp ? root.amp-ink : root.ink-k;
+                font-family: T.pedal;
                 font-size: 10.5px;
                 font-weight: 600;
             }
@@ -287,17 +313,17 @@ export component PedalView inherits Rectangle {
                 height: 38px;
                 border-radius: 4px;
                 border-width: 1px;
-                border-color: p.ink.with-alpha(0.32);
+                border-color: root.ink-1.with-alpha(0.32);
             }
             Text {
                 x: 6px;
                 y: 76px;
                 width: parent.width - 12px;
-                text: p.title;
+                text: p.type-first && T.effect-names && p.type-name != "" ? p.type-name : p.title;
                 horizontal-alignment: center;
                 overflow: elide;
-                color: p.ink;
-                font-family: T.display;
+                color: root.ink-1;
+                font-family: T.pedal;
                 font-size: 15.5px;
                 font-weight: 700;
             }
@@ -305,13 +331,14 @@ export component PedalView inherits Rectangle {
                 x: 6px;
                 y: 93px;
                 width: parent.width - 12px;
-                text: p.type-name;
+                text: p.type-first && T.effect-names && p.type-name != "" ? p.title.to-uppercase() : p.type-name;
                 horizontal-alignment: center;
                 overflow: elide;
                 color: root.ink-2;
-                font-family: T.display;
-                font-size: 11.5px;
-                font-weight: 500;
+                font-family: T.pedal;
+                font-size: p.type-first && T.effect-names ? 10.5px : 11.5px;
+                font-weight: p.type-first && T.effect-names ? 600 : 500;
+                letter-spacing: p.type-first && T.effect-names ? 0.8px : 0;
             }
             // footswitch: nut ring + domed metal cap
             Rectangle {
@@ -343,7 +370,7 @@ export component PedalView inherits Rectangle {
         // bypassed: the box sits in the dark, its lamp is off
         if bypassed && !lifted: Rectangle {
             border-radius: 7px;
-            background: #00000066;
+            background: #00000040;
         }
 
         // ------------------------------------------------ amp head: name, model, grille
@@ -354,8 +381,8 @@ export component PedalView inherits Rectangle {
                 width: parent.width - 12px;
                 text: p.title;
                 horizontal-alignment: center;
-                color: T.accent-ink;
-                font-family: T.display;
+                color: root.amp-ink;
+                font-family: T.pedal;
                 font-size: 14px;
                 font-weight: 700;
                 letter-spacing: 1.5px;
@@ -371,7 +398,7 @@ export component PedalView inherits Rectangle {
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 color: #D8DBE0;
-                font-family: T.display;
+                font-family: T.pedal;
                 font-size: 12px;
                 font-weight: 600;
             }

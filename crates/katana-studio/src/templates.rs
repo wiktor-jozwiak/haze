@@ -114,6 +114,23 @@ impl Rig<'_> {
         self.on(Node::Ns, "");
         self.prm("Patch_1", "PRM_NS1_THRESHOLD", threshold);
     }
+    /// Parametric EQ: low cut (index), low-mid (freq index, Q index, dB), high-mid (same),
+    /// high cut (index). Indexes as the Katana stores them (`eqcurve`).
+    fn peq(&mut self, low_cut: i16, lo_mid: (i16, i16, i16), hi_mid: (i16, i16, i16), high_cut: i16) {
+        self.on(Node::Eq, "PARAMETRIC EQ");
+        for (prm, v) in [
+            ("PRM_EQ_LOW_CUT", low_cut),
+            ("PRM_EQ_LOWMID_FREQ", lo_mid.0),
+            ("PRM_EQ_LOWMID_Q", lo_mid.1),
+            ("PRM_EQ_LOWMID_GAIN", lo_mid.2),
+            ("PRM_EQ_HIGHMID_FREQ", hi_mid.0),
+            ("PRM_EQ_HIGHMID_Q", hi_mid.1),
+            ("PRM_EQ_HIGHMID_GAIN", hi_mid.2),
+            ("PRM_EQ_HIGH_CUT", high_cut),
+        ] {
+            self.prm("Patch_0", prm, v);
+        }
+    }
     /// Chain pattern 0..6 (CHAIN 1, 2-1, 3-1, 4-1, 2-2, 3-2, 4-2).
     fn chain(&mut self, pattern: u8) {
         let rb = self.panel.routing_block;
@@ -249,6 +266,44 @@ pub const TEMPLATES: &[Template] = &[
             r.on(Node::Fx, "COMP");
             r.on(Node::Mod, "CHORUS");
             r.reverb("HALL", 35, 30);
+        },
+    },
+    Template {
+        name: "November Rain",
+        style: "Lead",
+        blurb: "Slash live: Les Paul neck pickup into a cranked Marshall, mids forward, eighth echo at 80 BPM, arena hall. Single coils? Switch FX on.",
+        hue: 0xC8402A,
+        build: |r| {
+            // CHAIN 3-1: the guitar sim (FX) sits ahead of the amp, where pickups would
+            r.chain(2);
+            // JCM800 / Silver Jubilee lead channel: gain past noon, mids up, presence moderate
+            r.amp(LEAD, false, [72, 52, 68, 54, 52, 50]);
+            // a touch of mid push for the neck pickup's singing sustain, no extra fuzz
+            r.booster("MID BOOST", 30, -5, 60);
+            // humbucker neck pickup on a single-coil guitar: GUITAR SIM S->H, left off
+            r.on(Node::Fx, "GUITAR SIM");
+            r.prm("Fx(2)", "PRM_FX1_GTRSIM_TYPE", 0);
+            r.prm("Fx(2)", "PRM_FX1_GTRSIM_LOW", 8);
+            r.prm("Fx(2)", "PRM_FX1_GTRSIM_HIGH", -6);
+            r.prm("Fx(2)", "PRM_FX1_GTRSIM_BODY", 60);
+            r.prm("Fx(2)", "PRM_FX1_GTRSIM_LEVEL", 70);
+            r.off(Node::Fx);
+            // 80 Hz low cut, −3 dB of neck-pickup woof at 250 Hz, +3 dB vocal bite at 1.6 kHz,
+            // fizz off above 6.3 kHz
+            r.peq(7, (11, 1, -3), (19, 1, 3), 10);
+            // EQ after the amp: it shapes the voice, not how hard the amp is driven
+            let rb = r.panel.routing_block;
+            r.raw(rb, 2, 1);
+            // the song runs at about 80 BPM: eighth-note echo, darkened repeats, low in the mix
+            r.delay("DIGITAL", 375, 22, 28);
+            r.prm("Delay(1)", "PRM_DLY_COMMON_HICUT", 9);
+            // arena hall: 2.6 s, 40 ms pre-delay keeps the pick attack clear
+            r.reverb("HALL", 26, 24);
+            r.prm("Patch_1", "PRM_REVERB_PREDELAY", 40);
+            r.prm("Patch_1", "PRM_REVERB_LOWCUT", 11);
+            r.prm("Patch_1", "PRM_REVERB_HICUT", 9);
+            // long notes must ring out: the gate only catches the hiss between phrases
+            r.gate(12);
         },
     },
 ];

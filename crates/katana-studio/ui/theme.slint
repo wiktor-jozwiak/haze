@@ -1,20 +1,35 @@
-// Boutique amp: black tolex, brushed gunmetal faceplates, cream silk-screen lettering, 1px hairlines,
-// one accent LED colour that follows the engine mode (amber = Katana over USB-MIDI,
-// cyan = standalone PC DSP). Flat fills only: the CPU renderer never shades per frame.
+// Modern hybrid: deep graphite surfaces with hairline edges, neutral type (Adwaita Sans, an
+// Inter cut), physical pedals and knobs as the only "hardware". One accent colour follows the
+// engine mode (amber = Katana over USB-MIDI, cyan = standalone PC DSP).
+// Flat fills only: the CPU renderer never shades per frame.
 export global T {
     /// true: HARDWARE (Katana USB-MIDI), false: STANDALONE (PC DSP engine). Set from Rust.
     in-out property <bool> hw: true;
+    /// look (Settings > Appearance, set from Rust): 0 Studio (graphite, one colour per effect),
+    /// 1 Katana panel (black like the amp, blocks lit in their green / red / yellow memory colour)
+    in-out property <int> skin: 0;
+    /// container pedals (Booster, Mod, FX, Pedal FX) show the effect name big, the slot small
+    in-out property <bool> effect-names: true;
+    /// help line over the signal chain (drag feedback always shows)
+    in-out property <bool> hints: true;
+    out property <bool> katana: skin == 1;
 
     // surfaces
-    out property <color> bg: #131211;
-    out property <color> bg-side: #0D0C0C;
-    out property <color> chrome: #0D0C0C;
-    out property <color> panel: #1A1918;
-    out property <color> panel-hi: #22201F;
-    out property <color> well: #100F0E;
-    out property <color> hover: #2B2927;
-    out property <color> line: #282624;
-    out property <color> line-hi: #35322F;
+    // Katana panel: neutral black, no blue cast
+    out property <color> bg: katana ? #0B0B0B : #0E0F12;
+    out property <color> bg-side: katana ? #080808 : #0B0C0E;
+    out property <color> chrome: katana ? #080808 : #0B0C0E;
+    out property <color> panel: katana ? #151515 : #17181C;
+    out property <color> panel-hi: katana ? #1E1E1E : #1F2126;
+    out property <color> well: katana ? #070707 : #0B0C0F;
+    out property <color> hover: katana ? #262626 : #25272D;
+    out property <color> line: katana ? #242424 : #23252B;
+    out property <color> line-hi: katana ? #333333 : #31343B;
+    // panel surfaces drawn as gradients (gear.slint)
+    out property <color> face-top: katana ? #171717 : #1A1B20;
+    out property <color> face-bot: katana ? #101010 : #15161A;
+    out property <color> app-top: katana ? #121212 : #131418;
+    out property <color> app-bot: katana ? #090909 : #0C0D10;
 
     // mode LEDs
     out property <color> cyan: #00E5FF;
@@ -26,13 +41,13 @@ export global T {
 
     // text: text-2 / text-3 keep WCAG AA (>= 4.5:1) on every surface up to `hover`;
     // text-off is only for disabled controls (exempt from contrast rules)
-    out property <color> text: #EEEAE3;
-    out property <color> text-2: #ADA79D;
-    out property <color> text-3: #98928A;
-    out property <color> text-off: #5E5953;
-    // silk-screen print on hardware faces (amp panel, header): warm cream like real amp lettering
-    out property <color> silk: #E8DDC6;
-    out property <color> silk-2: #A89F8C;
+    out property <color> text: #F2F3F5;
+    out property <color> text-2: #A9ADB6;
+    out property <color> text-3: #8F949E;
+    out property <color> text-off: #4F535B;
+    // labels on control surfaces (kept as separate tokens from text for the pedal faces)
+    out property <color> silk: #ECEDF0;
+    out property <color> silk-2: #A2A6AF;
 
     // status LEDs
     out property <color> led-green: #38E07B;
@@ -41,14 +56,17 @@ export global T {
     out property <color> danger: #FF4D5E;
 
     // all three faces ship inside the binary (fonts/, imported in main.slint): same look on every system
-    out property <string> display: "Barlow Semi Condensed";
+    // UI and headings: Adwaita Sans (variable, Inter-based); Barlow stays on the pedal faces
+    out property <string> display: "Adwaita Sans";
+    out property <string> pedal: "Barlow Semi Condensed";
     out property <string> mono: "JetBrains Mono";
     out property <length> r: 8px;
-    out property <length> r-card: 12px;
+    out property <length> r-card: 14px;
 
     /// block colour of BOOSTER, MOD, FX, DELAY, REVERB (summary LED order)
     public pure function fx(i: int) -> color {
-        if i == 0 { return #FF6B3D; }
+        // booster pink: orange would read as the amber hardware accent
+        if i == 0 { return #FF5C9E; }
         if i == 1 { return #4C8DFF; }
         if i == 2 { return #A070FF; }
         if i == 3 { return #2FD69A; }

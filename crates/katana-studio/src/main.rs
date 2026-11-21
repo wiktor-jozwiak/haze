@@ -17,6 +17,8 @@ mod check;
 mod panel;
 mod snapshot;
 mod eqcurve;
+mod pcfx;
+mod practice;
 mod history;
 mod templates;
 #[cfg(test)]
@@ -107,7 +109,7 @@ fn main() {
             for (k, inp) in [("wejścia", true), ("wyjścia", false)] {
                 println!("{k}:");
                 for d in haze_dsp::list_devices(inp) {
-                    println!("  {:<28} {}{}", d.id, d.label, if d.mic { "  [mikrofon?]" } else { "" });
+                    println!("  {:<28} {}{}{}", d.id, d.label, if d.mic { "  [mikrofon?]" } else { "" }, if d.busy { "  [zajęte]" } else { "" });
                 }
             }
         }

@@ -56,9 +56,9 @@ export component SetlistsPage inherits HorizontalLayout {
                     width: nt.preferred-width + 24px;
                     height: 30px;
                     border-radius: 6px;
-                    background: nta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+                    background: nta.has-hover ? #ffffff10 : #ffffff08;
                     border-width: 1px;
-                    border-color: #000000c0;
+                    border-color: #ffffff12;
                     nt := Text {
                         text: "+ NEW";
                         color: T.silk;
@@ -118,7 +118,7 @@ export component SetlistsPage inherits HorizontalLayout {
                     // click the title to rename, Enter saves
                     TextInput {
                         text: nav-title;
-                        color: #191715;
+                        color: T.text;
                         font-family: T.display;
                         font-size: 30px;
                         font-weight: 700;
@@ -130,7 +130,7 @@ export component SetlistsPage inherits HorizontalLayout {
                     }
                     Text {
                         text: (tones.length == 1 ? "1 preset" : tones.length + " presets") + "  ·  click a song to play it, double-click to edit";
-                        color: #5E574B;
+                        color: T.text-2;
                         font-size: 12px;
                     }
                 }

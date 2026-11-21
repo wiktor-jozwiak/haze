@@ -25,6 +25,11 @@ const VIEWS: &[(&str, &[&str], &[(&str, &str)])] = &[
     ("picker", &[], &[("HAZE_PICKER", "1")]),
     ("live", &[], &[("HAZE_PAGE", "2"), ("HAZE_LIVE", "2")]),
     ("standalone", &[], &[("HAZE_PC_MODE", "1")]),
+    ("rig-katana", &[], &[("HAZE_SKIN", "1")]),
+    ("tuner", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "4"), ("HAZE_FAKE_TUNER", "1")]),
+    ("pcfx", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "5")]),
+    ("practice", &[], &[("HAZE_PC_MODE", "1"), ("HAZE_PAGE", "6"), ("HAZE_FAKE_PRACTICE", "1")]),
+    ("practice-amp", &[], &[("HAZE_PAGE", "6")]),
 ];
 
 const MAX_BAD: f64 = 0.002;
@@ -99,7 +104,7 @@ pub fn run(dir: &Path, update: bool) -> bool {
         let shot = tmp.join(format!("{name}.png"));
         let mut c = Command::new(&exe);
         c.arg("--png").arg(&shot).args(*args).env("KATANA_STUDIO_LIBRARY", &lib);
-        for k in ["HAZE_FAKE_AMP", "HAZE_PAGE", "HAZE_PICKER", "HAZE_LIVE", "HAZE_PC_MODE", "HAZE_SCALE", "HAZE_ADD"] {
+        for k in ["HAZE_FAKE_AMP", "HAZE_PAGE", "HAZE_PICKER", "HAZE_LIVE", "HAZE_PC_MODE", "HAZE_SCALE", "HAZE_ADD", "HAZE_SKIN", "HAZE_FAKE_TUNER", "HAZE_FAKE_PRACTICE", "HAZE_PRACTICE"] {
             c.env_remove(k);
         }
         c.envs(env.iter().copied());

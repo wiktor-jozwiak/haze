@@ -1,0 +1,554 @@
+// Tuner page: an arc gauge (±50 cents, LED dots every 5 cents, a pointer riding the arc and
+// the deviation lit from the centre), the note large inside the arc, a strobe band for the
+// last cent, and the strings of the chosen tuning as tuning pegs. Runs on the PC engine.
+// Every value arrives from the 30 Hz meter timer in Rust (the pointer glides there, between
+// the 15 Hz pitch estimates); nothing here animates on its own, so a silent input costs no
+// redraws.
+import { T } from "theme.slint";
+import { Lamp } from "gear.slint";
+import { Pick } from "parts.slint";
+
+export struct TunerString {
+    note: string,
+    /// the string being played right now
+    active: bool,
+    /// held within ±2 cents for half a second since the page opened
+    tuned: bool,
+}
+
+component Seg inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    width: t.preferred-width + 22px;
+    height: 30px;
+    border-radius: 7px;
+    background: active ? T.accent.with-alpha(0.16) : ta.has-hover ? T.hover : transparent;
+    t := Text {
+        text: root.text;
+        color: active ? T.accent-hi : T.text-2;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Step inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: ta.pressed ? T.well : ta.has-hover ? T.hover : T.panel-hi;
+    Text {
+        text: root.text;
+        color: T.text;
+        font-size: 15px;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Group inherits Rectangle {
+    border-radius: 9px;
+    background: T.well;
+    border-width: 1px;
+    border-color: T.line;
+    height: 36px;
+}
+
+/// One string of the tuning as a tuning peg: note on a dark knob, string number under it, a
+/// coloured ring while it is the string being played, a green ring and tick once tuned.
+component Peg inherits VerticalLayout {
+    in property <string> note;
+    in property <int> number;
+    in property <bool> active;
+    in property <bool> tuned;
+    in property <color> lit;
+    spacing: 6px;
+    alignment: center;
+    Rectangle {
+        width: 60px;
+        height: 60px;
+        if root.active: Rectangle {
+            width: 84px;
+            height: 84px;
+            border-radius: 42px;
+            background: @radial-gradient(circle, root.lit.with-alpha(0.28) 0%, root.lit.with-alpha(0) 70%);
+        }
+        Rectangle {
+            border-radius: 30px;
+            background: @radial-gradient(circle, #2A2C33 0%, #16171B 100%);
+            border-width: root.active || root.tuned ? 2px : 1px;
+            border-color: root.active ? root.lit : root.tuned ? T.led-green.with-alpha(0.8) : T.line-hi;
+        }
+        Text {
+            text: root.note;
+            color: root.active ? T.text : root.tuned ? T.led-green : T.text-2;
+            font-family: T.display;
+            font-size: 20px;
+            font-weight: 700;
+        }
+    }
+    Text {
+        text: root.tuned ? "✓ " + root.number : "" + root.number;
+        color: root.tuned ? T.led-green : T.text-3;
+        font-size: 11px;
+        font-family: T.mono;
+        horizontal-alignment: center;
+    }
+}
+
+/// Arc gauge: ±50 cents over ±64°. LED dots every 5 cents (larger every 10, labelled every
+/// 25), green / amber zones, the deviation lit from 0 to the pointer, the note inside.
+component Gauge inherits Rectangle {
+    in property <bool> active;
+    in property <float> cents;
+    in property <color> lit;
+    in property <bool> in-tune;
+    in property <string> note;
+    in property <int> octave;
+    in property <float> hz;
+    in property <string> target;
+    in property <float> target-hz;
+
+    property <float> c: active ? clamp(cents, -50, 50) : 0;
+    property <angle> span: 64deg;
+    // geometry in px floats (Path coordinates)
+    property <float> w: self.width / 1px;
+    property <float> h: self.height / 1px;
+    property <float> r: max(60, min(w / 2 - 36, (h - 34) / 1.0));
+    property <float> cx: w / 2;
+    property <float> cy: 26 + r;
+    property <angle> a: c / 50 * span;
+
+    pure function px(ang: angle, rad: float) -> float { return cx + rad * Math.sin(ang); }
+    pure function py(ang: angle, rad: float) -> float { return cy - rad * Math.cos(ang); }
+    // SVG arc from angle a0 to a1 (a0 < a1) at radius rad
+    pure function arc(a0: angle, a1: angle, rad: float) -> string {
+        return "M " + px(a0, rad) + " " + py(a0, rad) + " A " + rad + " " + rad + " 0 0 1 " + px(a1, rad) + " " + py(a1, rad);
+    }
+
+    // track
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.w;
+        viewbox-height: root.h;
+        stroke: #ffffff10;
+        stroke-width: 14px;
+        fill: transparent;
+        commands: root.arc(-root.span, root.span, root.r);
+    }
+    // amber zone ±10 cents, green ±2
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.w;
+        viewbox-height: root.h;
+        stroke: T.led-yellow.with-alpha(0.18);
+        stroke-width: 14px;
+        fill: transparent;
+        commands: root.arc(-root.span * 0.2, root.span * 0.2, root.r);
+    }
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.w;
+        viewbox-height: root.h;
+        stroke: T.led-green.with-alpha(root.in-tune ? 0.9 : 0.35);
+        stroke-width: 14px;
+        fill: transparent;
+        commands: root.arc(-root.span * 0.04, root.span * 0.04, root.r);
+    }
+    // deviation: lit from the centre to the pointer
+    if root.active && abs(root.c) > 0.6: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.w;
+        viewbox-height: root.h;
+        stroke: root.lit.with-alpha(0.75);
+        stroke-width: 6px;
+        fill: transparent;
+        commands: root.c < 0 ? root.arc(root.a, 0deg, root.r) : root.arc(0deg, root.a, root.r);
+    }
+    // LED dots every 5 cents, inside the track
+    for i in 21: Rectangle {
+        property <float> cv: (i - 10) * 5;
+        property <angle> da: cv / 50 * root.span;
+        property <bool> major: Math.mod(i, 2) == 0;
+        property <bool> on: root.active && abs(root.c - cv) <= 2.5;
+        property <length> d: on ? 10px : major ? 6px : 4px;
+        x: root.px(da, root.r - 26) * 1px - self.width / 2;
+        y: root.py(da, root.r - 26) * 1px - self.height / 2;
+        width: d;
+        height: d;
+        border-radius: d / 2;
+        background: on ? root.lit : i == 10 ? T.led-green.with-alpha(0.6) : major ? #ffffff40 : #ffffff22;
+    }
+    // labels
+    for v in [-50, -25, 0, 25, 50]: Text {
+        property <angle> la: v / 50 * root.span;
+        x: root.px(la, root.r - 48) * 1px - self.width / 2;
+        y: root.py(la, root.r - 48) * 1px - self.height / 2;
+        width: 36px;
+        horizontal-alignment: center;
+        text: v > 0 ? "+" + v : "" + v;
+        color: v == 0 ? T.led-green.with-alpha(0.8) : T.text-3;
+        font-family: T.mono;
+        font-size: 11px;
+    }
+    // pointer: a bright bar across the track with a glow at its tip
+    if root.active: Rectangle {
+        x: root.px(root.a, root.r) * 1px - self.width / 2;
+        y: root.py(root.a, root.r) * 1px - self.height / 2;
+        width: 56px;
+        height: 56px;
+        border-radius: 28px;
+        background: @radial-gradient(circle, root.lit.with-alpha(0.45) 0%, root.lit.with-alpha(0) 70%);
+    }
+    if root.active: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.w;
+        viewbox-height: root.h;
+        stroke: root.lit;
+        stroke-width: 6px;
+        stroke-line-cap: round;
+        fill: transparent;
+        MoveTo { x: root.px(root.a, root.r - 38); y: root.py(root.a, root.r - 38); }
+        LineTo { x: root.px(root.a, root.r + 16); y: root.py(root.a, root.r + 16); }
+    }
+    // flat / sharp chevrons on the arc ends
+    Text {
+        x: root.px(-root.span, root.r + 4) * 1px - 34px;
+        y: root.py(-root.span, root.r + 4) * 1px + 6px;
+        text: "♭";
+        color: root.active && !root.in-tune && root.c < 0 ? root.lit : T.text-off;
+        font-size: 30px;
+    }
+    Text {
+        x: root.px(root.span, root.r + 4) * 1px + 10px;
+        y: root.py(root.span, root.r + 4) * 1px + 6px;
+        text: "♯";
+        color: root.active && !root.in-tune && root.c > 0 ? root.lit : T.text-off;
+        font-size: 30px;
+    }
+    // note, inside the arc
+    if root.in-tune: Rectangle {
+        x: root.cx * 1px - self.width / 2;
+        y: (root.cy - root.r * 0.5) * 1px - self.height / 2;
+        width: root.r * 0.95 * 1px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: @radial-gradient(circle, T.led-green.with-alpha(0.22) 0%, T.led-green.with-alpha(0) 70%);
+    }
+    nt := Text {
+        x: root.cx * 1px - self.width / 2;
+        y: (root.cy - root.r * 0.5) * 1px - self.height / 2;
+        text: root.active ? root.note : "—";
+        color: !root.active ? T.text-off : root.in-tune ? T.led-green : T.text;
+        font-family: T.display;
+        font-size: max(40px, root.r * 0.38 * 1px);
+        font-weight: 700;
+    }
+    if root.active: Text {
+        x: nt.x + nt.width + 4px;
+        y: nt.y + nt.height * 0.62;
+        text: root.octave;
+        color: T.text-3;
+        font-family: T.display;
+        font-size: max(16px, root.r * 0.11 * 1px);
+        font-weight: 600;
+    }
+    // cents and frequency under the note
+    VerticalLayout {
+        x: 0;
+        y: (root.cy - root.r * 0.2) * 1px;
+        width: root.width;
+        height: max(16px, root.r * 0.085 * 1px) * 1.4 + 26px;
+        spacing: 4px;
+        Text {
+            horizontal-alignment: center;
+            text: !root.active ? "— ¢" : (root.cents >= 0 ? "+" : "−") + round(abs(root.cents) * 10) / 10 + " ¢";
+            color: root.lit;
+            font-family: T.mono;
+            font-size: max(16px, root.r * 0.085 * 1px);
+            font-weight: 700;
+        }
+        Text {
+            horizontal-alignment: center;
+            text: !root.active ? "" : round(root.hz * 100) / 100 + " Hz" + (root.target != "" ? "   →  " + root.target + "  " + round(root.target-hz * 100) / 100 + " Hz" : "");
+            color: T.text-3;
+            font-family: T.mono;
+            font-size: 12px;
+        }
+    }
+}
+
+export component TunerPage inherits VerticalLayout {
+    /// the PC engine runs and listens to the guitar input
+    in property <bool> engine;
+    in property <bool> active;
+    in property <string> note: "—";
+    in property <int> octave;
+    /// needle value: from the target string (string mode) or the nearest note (chromatic)
+    in property <float> cents;
+    in property <float> hz;
+    in property <string> target;
+    in property <float> target-hz;
+    /// strobe phase 0..1, advanced in Rust by the cents error each frame
+    in property <float> strobe;
+    in property <[TunerString]> strings;
+    in property <string> tuning-name;
+    in property <int> reference: 440;
+    in property <bool> mute;
+    in property <bool> chromatic;
+    callback tuning-request();
+    callback reference-changed(int);
+    callback mute-toggled(bool);
+    callback mode-picked(bool);
+    callback engine-request();
+
+    property <bool> in-tune: active && abs(cents) < 2;
+    property <color> lit: !active ? T.text-off : in-tune ? T.led-green : abs(cents) < 10 ? T.led-yellow : T.led-red;
+
+    padding-top: 6px;
+    spacing: 16px;
+
+    // ---------------------------------------------------------------- header + controls
+    HorizontalLayout {
+        height: 44px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            Text {
+                text: "Tuner";
+                color: T.text;
+                font-family: T.display;
+                font-size: 24px;
+                font-weight: 700;
+            }
+            Text {
+                text: "Play one string at a time and let it ring.";
+                color: T.text-2;
+                font-size: 12.5px;
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        VerticalLayout {
+            alignment: center;
+            Group {
+                width: modes.preferred-width + 6px;
+                modes := HorizontalLayout {
+                    padding: 3px;
+                    spacing: 2px;
+                    Seg {
+                        text: "STRINGS";
+                        active: !chromatic;
+                        clicked => { mode-picked(false); }
+                    }
+                    Seg {
+                        text: "CHROMATIC";
+                        active: chromatic;
+                        clicked => { mode-picked(true); }
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Pick {
+                text: tuning-name;
+                enabled: !chromatic;
+                clicked => { tuning-request(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Group {
+                width: refs.preferred-width + 6px;
+                refs := HorizontalLayout {
+                    padding: 3px;
+                    spacing: 6px;
+                    Step {
+                        text: "−";
+                        clicked => { reference-changed(reference - 1); }
+                    }
+                    Text {
+                        text: "A4 " + reference + " Hz";
+                        color: reference == 440 ? T.text-2 : T.accent-hi;
+                        font-family: T.mono;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    Step {
+                        text: "+";
+                        clicked => { reference-changed(reference + 1); }
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: mt.preferred-width + 40px;
+                height: 36px;
+                border-radius: 9px;
+                background: mute ? T.led-red.with-alpha(0.14) : mta.has-hover ? T.hover : T.panel-hi;
+                border-width: 1px;
+                border-color: mute ? T.led-red.with-alpha(0.5) : T.line;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Lamp { size: 8px; c: T.led-red; lit: mute; }
+                    }
+                    mt := Text {
+                        text: "MUTE";
+                        color: mute ? T.text : T.text-2;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+                mta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { mute-toggled(!mute); }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- readout
+    Rectangle {
+        vertical-stretch: 1;
+        border-radius: T.r-card;
+        background: @radial-gradient(circle, #1C1E23 0%, #131418 75%);
+        border-width: 1px;
+        border-color: root.in-tune ? T.led-green.with-alpha(0.55) : T.line;
+        clip: true;
+
+        if !engine: VerticalLayout {
+            alignment: center;
+            spacing: 14px;
+            Text {
+                text: "The tuner listens to the guitar input of the PC engine";
+                color: T.text-2;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: sw.preferred-width + 28px;
+                    height: 34px;
+                    border-radius: 8px;
+                    background: swa.has-hover ? T.cyan.with-alpha(0.22) : T.cyan.with-alpha(0.12);
+                    border-width: 1px;
+                    border-color: T.cyan.with-alpha(0.45);
+                    sw := Text {
+                        text: T.hw ? "Switch to PC" : "Start audio";
+                        color: T.cyan;
+                        font-size: 13px;
+                        font-weight: 600;
+                    }
+                    swa := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.engine-request(); }
+                    }
+                }
+            }
+        }
+
+        if engine: VerticalLayout {
+            padding: 18px;
+            padding-bottom: 16px;
+            spacing: 12px;
+            Gauge {
+                vertical-stretch: 1;
+                active: root.active;
+                cents: root.cents;
+                lit: root.lit;
+                in-tune: root.in-tune;
+                note: root.note;
+                octave: root.octave;
+                hz: root.hz;
+                target: !root.chromatic ? root.target : "";
+                target-hz: root.target-hz;
+            }
+            // strobe: stripes drift right when sharp, left when flat, stand still in tune
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: min(620px, root.width - 80px);
+                    height: 26px;
+                    border-radius: 13px;
+                    background: T.well;
+                    border-width: 1px;
+                    border-color: root.in-tune ? T.led-green.with-alpha(0.4) : T.line;
+                    clip: true;
+                    property <length> period: 32px;
+                    for i in 24: Rectangle {
+                        x: (i - 1) * period + strobe * period;
+                        y: 6px;
+                        width: period * 0.45;
+                        height: parent.height - 12px;
+                        border-radius: 3px;
+                        background: !root.active ? #ffffff10 : root.in-tune ? T.led-green.with-alpha(0.85) : root.lit.with-alpha(0.5);
+                    }
+                    // fade the stripes into the ends
+                    Rectangle {
+                        width: 60px;
+                        x: 0;
+                        background: @linear-gradient(90deg, T.well 0%, T.well.with-alpha(0) 100%);
+                    }
+                    Rectangle {
+                        width: 60px;
+                        x: parent.width - 60px;
+                        background: @linear-gradient(90deg, T.well.with-alpha(0) 0%, T.well 100%);
+                    }
+                    Rectangle {
+                        x: (parent.width - 2px) / 2;
+                        width: 2px;
+                        background: T.text-3.with-alpha(0.6);
+                    }
+                }
+            }
+            Text {
+                text: !active ? "Play a string and let it ring"
+                    : in-tune ? "In tune"
+                    : cents < 0 ? "Tune up  ▲" : "Tune down  ▼";
+                color: !active ? T.text-3 : in-tune ? T.led-green : T.text-2;
+                font-family: T.display;
+                font-size: 14px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- strings
+    if !chromatic: HorizontalLayout {
+        alignment: center;
+        spacing: 14px;
+        height: 84px;
+        for s[i] in strings: Peg {
+            note: s.note;
+            number: strings.length - i;
+            active: s.active;
+            tuned: s.tuned;
+            lit: root.lit;
+        }
+    }
+}

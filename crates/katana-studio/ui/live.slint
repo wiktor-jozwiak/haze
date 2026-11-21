@@ -251,7 +251,7 @@ export component LiveView inherits Rectangle {
         }
     }
 
-    // ---- next up: a strip of paper taped to the floor
+    // ---- next up
     Paper {
         x: 40px;
         y: parent.height - 92px;
@@ -263,7 +263,7 @@ export component LiveView inherits Rectangle {
             spacing: 18px;
             Text {
                 text: "NEXT";
-                color: #7A7264;
+                color: T.text-3;
                 font-family: T.mono;
                 font-size: 14px;
                 font-weight: 700;
@@ -272,7 +272,7 @@ export component LiveView inherits Rectangle {
             }
             nx := Text {
                 text: root.has-next ? tones[selected-index + 1].name.to-uppercase() : "END OF LIST";
-                color: root.has-next ? #191715 : #7A7264;
+                color: root.has-next ? T.text : T.text-3;
                 font-family: T.display;
                 font-size: 30px;
                 font-weight: 700;

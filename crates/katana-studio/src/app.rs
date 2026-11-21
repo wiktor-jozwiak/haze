@@ -27,14 +27,20 @@ enum Popup {
     /// audio device lists shown in the picker (value = index + 1, 0 = none / system)
     AudioIn(Vec<haze_dsp::DeviceInfo>),
     AudioOut(Vec<haze_dsp::DeviceInfo>),
+    /// which input of the picked interface carries the guitar (value 0 = auto, 1.. = input)
+    AudioCh,
+    /// tuner string set (value = index into TUNINGS)
+    Tuning,
 }
 
-/// Audio device choice, kept next to the library: `in=…`, `out=…`, `buffer=…`, `rate=…`.
+/// Audio device choice, kept next to the library: `in=…`, `ch=…` (1-based, empty = auto),
+/// `out=…`, `buffer=…`, `rate=…`.
 fn load_audio_cfg(root: &std::path::Path) -> haze_dsp::Config {
     let mut c = haze_dsp::Config::default();
     for l in std::fs::read_to_string(root.join("audio.conf")).unwrap_or_default().lines() {
         match l.split_once('=') {
             Some(("in", v)) if !v.is_empty() => c.input = Some(v.to_string()),
+            Some(("ch", v)) => c.channel = v.parse::<usize>().ok().filter(|n| *n >= 1).map(|n| n - 1),
             Some(("out", v)) if !v.is_empty() => c.output = Some(v.to_string()),
             Some(("buffer", v)) => c.buffer = v.parse().unwrap_or(c.buffer),
             Some(("rate", v)) => c.rate = v.parse().unwrap_or(c.rate),
@@ -44,32 +50,220 @@ fn load_audio_cfg(root: &std::path::Path) -> haze_dsp::Config {
     c
 }
 
-/// Interface preferences (`ui.conf`): size in percent, library sort order.
-fn load_ui_cfg(root: &std::path::Path) -> (i32, i32) {
-    let (mut scale, mut sort) = (100, 0);
+/// Interface preferences (`ui.conf`).
+#[derive(Clone, Copy)]
+struct UiCfg {
+    /// size in percent: 100, 125, 150
+    scale: i32,
+    /// library sort order 0..3
+    sort: i32,
+    /// look: 0 Studio, 1 Katana panel (`T.skin`)
+    skin: i32,
+    /// container pedals named by effect (true) or by slot
+    effect_names: bool,
+    /// help line over the signal chain
+    hints: bool,
+}
+
+impl Default for UiCfg {
+    fn default() -> Self {
+        UiCfg { scale: 100, sort: 0, skin: 0, effect_names: true, hints: true }
+    }
+}
+
+fn load_ui_cfg(root: &std::path::Path) -> UiCfg {
+    let mut c = UiCfg::default();
     for l in std::fs::read_to_string(root.join("ui.conf")).unwrap_or_default().lines() {
         match l.split_once('=') {
-            Some(("scale", v)) => scale = v.parse().ok().filter(|x| [100, 125, 150].contains(x)).unwrap_or(100),
-            Some(("sort", v)) => sort = v.parse().ok().filter(|x| (0..3).contains(x)).unwrap_or(0),
+            Some(("scale", v)) => c.scale = v.parse().ok().filter(|x| [100, 125, 150].contains(x)).unwrap_or(100),
+            Some(("sort", v)) => c.sort = v.parse().ok().filter(|x| (0..3).contains(x)).unwrap_or(0),
+            Some(("skin", v)) => c.skin = v.parse().ok().filter(|x| (0..2).contains(x)).unwrap_or(0),
+            Some(("names", v)) => c.effect_names = v != "slot",
+            Some(("hints", v)) => c.hints = v != "0",
             _ => {}
         }
     }
-    (scale, sort)
+    c
 }
 
-fn save_ui_cfg(root: &std::path::Path, scale: i32, sort: i32) {
-    let _ = std::fs::write(root.join("ui.conf"), format!("scale={scale}\nsort={sort}\n"));
+fn save_ui_cfg(root: &std::path::Path, c: &UiCfg) {
+    let txt = format!(
+        "scale={}\nsort={}\nskin={}\nnames={}\nhints={}\n",
+        c.scale,
+        c.sort,
+        c.skin,
+        if c.effect_names { "effect" } else { "slot" },
+        c.hints as i32
+    );
+    let _ = std::fs::write(root.join("ui.conf"), txt);
+}
+
+use crate::practice::PracticeCfg;
+
+/// DSP voicing (`haze_dsp::blocks::VOICINGS`) of a preamp TYPE value: the five panel types
+/// and their variations, and the 26 models Tone Studio can put in a patch.
+fn voicing_of(v: i16) -> i32 {
+    match v {
+        // ACOUSTIC
+        1 | 28 => 0,
+        // NATURAL CLEAN, CLEAN, CLEAN TWIN
+        0 | 8 | 9 => 1,
+        // CLEAN VARIATION, COMBO CRUNCH, PRO CRUNCH, DELUXE CRUNCH, VO DRIVE
+        29 | 2 | 10 | 12 | 13 => 2,
+        // CRUNCH (+VAR), STACK CRUNCH, VO LEAD, MATCH DRIVE, BG DRIVE, MS1959 I / I+II, CUSTOM
+        11 | 30 | 3 | 14 | 15 | 17 | 18 | 19 | 25 => 3,
+        // LEAD (+VAR), HiGAIN STACK, POWER DRIVE, BG LEAD, T-AMP LEAD
+        24 | 31 | 4 | 5 | 16 | 22 => 4,
+        // BROWN, R-FIER VINTAGE
+        23 | 20 => 5,
+        // BROWN VARIATION, EXTREME LEAD, CORE METAL, R-FIER MODERN
+        32 | 6 | 7 | 21 => 6,
+        _ => 1,
+    }
+}
+
+/// Tuner page settings (`tuner.conf`) and readout state.
+struct TunerUi {
+    /// index into `haze_dsp::tuner::TUNINGS`
+    tuning: usize,
+    /// A4 in Hz
+    reference: i32,
+    chromatic: bool,
+    /// strobe phase 0..1
+    strobe: f32,
+    /// per string: estimates in a row within ±2 cents, and "tuned" once held ~0.5 s
+    hold: Vec<u32>,
+    tuned: Vec<bool>,
+    /// string shown as active in the strings row (to skip unchanged model writes)
+    shown: Option<usize>,
+    /// last needle value, for the strobe between estimates
+    needle: Option<f32>,
+    /// needle as drawn: glides toward `needle` every 30 Hz frame, between the 15 Hz estimates
+    drawn: Option<f32>,
+}
+
+impl TunerUi {
+    fn load(root: &std::path::Path) -> Self {
+        let mut t = TunerUi { tuning: 0, reference: 440, chromatic: false, strobe: 0.0, hold: vec![], tuned: vec![], shown: None, needle: None, drawn: None };
+        for l in std::fs::read_to_string(root.join("tuner.conf")).unwrap_or_default().lines() {
+            match l.split_once('=') {
+                Some(("tuning", v)) => t.tuning = v.parse().ok().filter(|x| *x < haze_dsp::tuner::TUNINGS.len()).unwrap_or(0),
+                Some(("ref", v)) => t.reference = v.parse().ok().filter(|x| (430..=450).contains(x)).unwrap_or(440),
+                Some(("chromatic", v)) => t.chromatic = v == "1",
+                _ => {}
+            }
+        }
+        t.reset_strings();
+        t
+    }
+
+    fn save(&self, root: &std::path::Path) {
+        let _ = std::fs::write(root.join("tuner.conf"), format!("tuning={}\nref={}\nchromatic={}\n", self.tuning, self.reference, self.chromatic as i32));
+    }
+
+    fn reset_strings(&mut self) {
+        let n = haze_dsp::tuner::TUNINGS[self.tuning].strings.len();
+        self.hold = vec![0; n];
+        self.tuned = vec![false; n];
+        self.shown = None;
+    }
+
+    fn strings_model(&self) -> ModelRc<crate::TunerString> {
+        let t = &haze_dsp::tuner::TUNINGS[self.tuning];
+        let rows: Vec<crate::TunerString> = t
+            .strings
+            .iter()
+            .enumerate()
+            .map(|(i, &m)| crate::TunerString { note: s(haze_dsp::tuner::note_name(m)), active: self.shown == Some(i), tuned: self.tuned[i] })
+            .collect();
+        ModelRc::new(VecModel::from(rows))
+    }
+
+    fn push_settings(&self, ui: &MainWindow) {
+        ui.set_tuner_tuning_name(s(haze_dsp::tuner::TUNINGS[self.tuning].name));
+        ui.set_tuner_reference(self.reference);
+        ui.set_tuner_chromatic(self.chromatic);
+        ui.set_tuner_strings(self.strings_model());
+    }
+}
+
+/// Push one tuner estimate to the UI. Footer properties always; the page's only while it shows.
+fn tuner_readout(tu: &mut TunerUi, ui: &MainWindow, p: Option<haze_dsp::Pitch>, page: bool) {
+    use haze_dsp::tuner::{nearest_string, TUNINGS};
+    let Some(p) = p else {
+        if ui.get_tuner_active() {
+            ui.set_tuner_active(false);
+        }
+        tu.needle = None;
+        tu.hold.iter_mut().for_each(|h| *h = 0);
+        return;
+    };
+    ui.set_tuner_active(true);
+    ui.set_tuner_note(s(p.note));
+    ui.set_tuner_octave(p.octave);
+    ui.set_tuner_cents(p.cents);
+    if !page {
+        tu.needle = None;
+        return;
+    }
+    let t = &TUNINGS[tu.tuning];
+    let i = nearest_string(t, p.midi_f);
+    let target = t.strings[i];
+    let needle = if tu.chromatic { p.cents } else { (p.midi_f - target as f32) * 100.0 };
+    tu.needle = Some(needle);
+    // a new note (or a jump to another string) snaps; small moves glide in `meter_frame`
+    if tu.drawn.is_none_or(|d| (d - needle).abs() > 30.0) {
+        tu.drawn = Some(needle);
+        ui.set_tuner_needle(needle);
+    }
+    ui.set_tuner_hz(p.hz);
+    if !tu.chromatic {
+        ui.set_tuner_target(s(format!("{}{}", haze_dsp::tuner::note_name(target), target.div_euclid(12) - 1)));
+        ui.set_tuner_target_hz(tu.reference as f32 * 2f32.powf((target as f32 - 69.0) / 12.0));
+        for (k, h) in tu.hold.iter_mut().enumerate() {
+            *h = if k == i && needle.abs() < 2.0 { *h + 1 } else { 0 };
+        }
+        let newly = tu.hold[i] >= 8 && !tu.tuned[i];
+        if newly {
+            tu.tuned[i] = true;
+        }
+        if newly || tu.shown != Some(i) {
+            tu.shown = Some(i);
+            ui.set_tuner_strings(tu.strings_model());
+        }
+    }
+}
+
+/// Katana panel look: a block takes the colour its button lights on the amp (green / red /
+/// yellow memory), blocks without one stay graphite.
+fn katana_hue(mem: Option<usize>) -> slint::Color {
+    match mem {
+        Some(0) => slint::Color::from_rgb_u8(0x2f, 0x7d, 0x4a),
+        Some(1) => slint::Color::from_rgb_u8(0xa5, 0x2a, 0x33),
+        Some(_) => slint::Color::from_rgb_u8(0xb8, 0x90, 0x1f),
+        None => slint::Color::from_rgb_u8(0x3a, 0x3c, 0x40),
+    }
 }
 
 fn save_audio_cfg(root: &std::path::Path, c: &haze_dsp::Config) {
     let txt = format!(
-        "in={}\nout={}\nbuffer={}\nrate={}\n",
+        "in={}\nch={}\nout={}\nbuffer={}\nrate={}\n",
         c.input.as_deref().unwrap_or(""),
+        c.channel.map_or(String::new(), |n| (n + 1).to_string()),
         c.output.as_deref().unwrap_or(""),
         c.buffer,
         c.rate
     );
     let _ = std::fs::write(root.join("audio.conf"), txt);
+}
+
+/// Header label of the guitar input: card plus the input number when one is fixed.
+fn input_label(name: Option<&str>, ch: Option<usize>) -> String {
+    let card = dev_label(name, "None (DI)");
+    match (name, ch) {
+        (Some(n), Some(c)) if n != "default" => format!("{card} · in {}", c + 1),
+        _ => card,
+    }
 }
 
 /// Short header label of a cpal device name.
@@ -127,6 +321,10 @@ pub struct App {
     sort: i32,
     /// interface size in percent, on top of the system scale `os_scale`
     ui_scale: i32,
+    /// Settings > Appearance (`ui.conf`)
+    skin: i32,
+    effect_names: bool,
+    hints: bool,
     os_scale: f32,
     /// A/B compare: the snapshot not on screen, and which slot is on screen (0 = A, 1 = B)
     ab_other: Option<Patch>,
@@ -136,6 +334,14 @@ pub struct App {
     engine: Option<haze_dsp::Engine>,
     audio_cfg: haze_dsp::Config,
     tuner: Option<haze_dsp::Tuner>,
+    tu: TunerUi,
+    /// PC FX page model, built on the first visit
+    pcfx: Option<crate::pcfx::PcFxUi>,
+    pr: PracticeCfg,
+    /// Practice page models (mixer strips, drum grid, meters)
+    prui: Option<crate::practice::PracticeUi>,
+    /// practice.conf is written a moment after the last change (fader drags fire per move)
+    pr_save: Timer,
     /// voicing chosen on the PC side that the Katana does not have (PUSHED / MODERN)
     dsp_voicing: Option<i32>,
     di_on: bool,
@@ -222,8 +428,10 @@ impl App {
         let audio_cfg = load_audio_cfg(lib.root());
         ui.set_audio_buffer(audio_cfg.buffer as i32);
         ui.set_audio_rate(audio_cfg.rate as i32);
-        ui.set_audio_input(s(dev_label(audio_cfg.input.as_deref(), "None (DI)")));
+        ui.set_audio_input(s(input_label(audio_cfg.input.as_deref(), audio_cfg.channel)));
         ui.set_audio_device(s(dev_label(audio_cfg.output.as_deref(), "System default")));
+        let tu = TunerUi::load(lib.root());
+        tu.push_settings(ui);
         let app = App {
             ui: ui.as_weak(),
             lib,
@@ -255,6 +463,9 @@ impl App {
             tag: String::new(),
             sort: 0,
             ui_scale: 100,
+            skin: 0,
+            effect_names: true,
+            hints: true,
             os_scale: 1.0,
             ab_other: None,
             ab_slot: 0,
@@ -262,9 +473,15 @@ impl App {
             engine: None,
             audio_cfg,
             tuner: None,
+            tu,
+            pcfx: None,
+            pr: PracticeCfg::default(),
+            prui: None,
+            pr_save: Timer::default(),
             dsp_voicing: None,
-            // no guitar plugged in is the common first run: start on the DI loop
-            di_on: true,
+            // the DI riff plays only on request (DI ▶): starting it on its own put a loud demo
+            // riff on the speakers the moment the PC engine came up
+            di_on: false,
             meter_timer: Timer::default(),
             meter_tick: 0,
             clip_hold: [0; 2],
@@ -276,9 +493,23 @@ impl App {
         APP.with(|a| *a.borrow_mut() = Some(app.clone()));
         bind(ui);
         let mut a = app.borrow_mut();
-        (a.ui_scale, a.sort) = load_ui_cfg(a.lib.root());
+        a.pr = PracticeCfg::load(a.lib.root());
+        a.pr.apply(&a.dsp, ui);
+        let prui = crate::practice::PracticeUi::new(ui);
+        prui.show(&a.pr);
+        a.prui = Some(prui);
+        crate::pcfx::load(a.lib.root(), &a.dsp);
+        let mut cfg = load_ui_cfg(a.lib.root());
+        // HAZE_SKIN=n: render a look offscreen (snapshot-check) without touching ui.conf
+        if let Some(v) = std::env::var("HAZE_SKIN").ok().and_then(|v| v.parse().ok()) {
+            cfg.skin = v;
+        }
+        (a.ui_scale, a.sort, a.skin, a.effect_names, a.hints) = (cfg.scale, cfg.sort, cfg.skin, cfg.effect_names, cfg.hints);
         ui.set_ui_scale(a.ui_scale);
         ui.set_sort(a.sort);
+        ui.global::<T>().set_skin(a.skin);
+        ui.global::<T>().set_effect_names(a.effect_names);
+        ui.global::<T>().set_hints(a.hints);
         // the native window exists once the loop runs: read the system scale, then apply ours
         Timer::single_shot(Duration::ZERO, || with_app(|a| {
             a.os_scale = a.ui().window().scale_factor();
@@ -593,6 +824,16 @@ impl App {
         self.edit.block(self.panel.routing_block)[off]
     }
 
+    fn save_ui(&self) {
+        let c = UiCfg { scale: self.ui_scale, sort: self.sort, skin: self.skin, effect_names: self.effect_names, hints: self.hints };
+        save_ui_cfg(self.lib.root(), &c);
+    }
+
+    /// Enclosure colour of a block in the current look.
+    fn block_hue(&self, d: &NodeDef) -> slint::Color {
+        if self.skin == 1 && d.node != Node::Amp { katana_hue(self.variant_sel(d)) } else { d.hue }
+    }
+
     fn variant_sel(&self, d: &NodeDef) -> Option<usize> {
         d.variant.map(|v| (self.p2(v.sel) as usize).min(2))
     }
@@ -637,11 +878,12 @@ impl App {
             on: self.node_on(d),
             has_sw: d.sw.is_some(),
             led: self.variant_sel(d).map_or(1, |c| c as i32 + 1),
-            hue: d.hue,
+            hue: self.block_hue(d),
             // silkscreen colour: dark on bright enclosures, cream on dark ones
-            ink: ink_for(d.hue),
+            ink: ink_for(self.block_hue(d)),
             movable: chain::movable(n),
             is_amp: n == Node::Amp,
+            type_first: matches!(n, Node::Booster | Node::Mod | Node::Fx | Node::PedalFx),
             knobs: ModelRc::new(VecModel::from(knobs)),
             kind: self.panel.nodes.iter().position(|x| x.node == n).unwrap_or(0) as i32,
         };
@@ -654,7 +896,26 @@ impl App {
         let rows: Vec<Pedal> = self.layout.iter().map(|n| self.pedal_row(*n)).collect();
         self.pedals.set_vec(rows);
         let ui = self.ui();
-        ui.set_ed_chain_name(s(nice(PATTERN_NAMES[rt.pattern as usize])));
+        let cur = chain::CHAIN_PRESETS.iter().position(|p| p.routing == rt);
+        let pat = nice(PATTERN_NAMES[rt.pattern as usize]);
+        // readable order name; the Katana's pattern number ("Chain 2-2") is jargon, so it only
+        // shows when the order matches none of the named presets
+        ui.set_ed_chain_name(s(match cur {
+            Some(i) => chain::CHAIN_PRESETS[i].name.to_string(),
+            None => pat,
+        }));
+        let opts: Vec<crate::ChainOpt> = chain::CHAIN_PRESETS
+            .iter()
+            .enumerate()
+            .map(|(i, p)| crate::ChainOpt {
+                name: s(p.name),
+                blurb: s(p.blurb),
+                // the gate always opens the chain: leave it out so the part that differs fits
+                flow: s(p.routing.layout().iter().skip(1).map(|n| nice(self.panel.node(*n).title)).collect::<Vec<_>>().join(" → ")),
+                current: cur == Some(i),
+            })
+            .collect();
+        ui.set_chain_presets(ModelRc::new(VecModel::from(opts)));
         self.refresh_fx_count();
         self.refresh_inspector();
     }
@@ -781,13 +1042,10 @@ impl App {
         ui.set_pedal_selected(self.layout.iter().position(|x| *x == n).map_or(-1, |i| i as i32));
         ui.set_insp_title(s(nice(d.title)));
         ui.set_insp_subtitle(s(nice(&self.type_name(d))));
-        // the amp carries the engine-mode accent (amber hardware, cyan standalone), dimmed:
-        // the inspector brightens its hue for arcs and tabs
-        let hue = match (n == Node::Amp, self.hw) {
-            (true, true) => slint::Color::from_rgb_u8(0xb8, 0x70, 0x10),
-            (true, false) => slint::Color::from_rgb_u8(0x00, 0xa0, 0xb4),
-            _ => d.hue,
-        };
+        // the amp is the one neutral block: an ivory control panel in both engine modes, so the
+        // mode accent stays reserved for selection and the main action (the inspector
+        // brightens this hue for arcs and tabs)
+        let hue = if n == Node::Amp { slint::Color::from_rgb_u8(0xa8, 0x9e, 0x88) } else { self.block_hue(d) };
         ui.set_insp_hue(hue);
         ui.set_insp_ink(ink_for(hue));
         ui.set_insp_has_sw(d.sw.is_some());
@@ -810,6 +1068,55 @@ impl App {
             [d.sw, d.ty, Some(self.panel.amp_type)].iter().flatten().any(|x| x.block == r.block && std::ptr::eq(x.param, r.param))
         };
         self.insp_rows = self.panel.section_params(&d.sections[self.insp_section], &self.edit).into_iter().filter(|r| !skip(r)).collect();
+        // Amp tab: one centred row of grouped controls (gain | tone | output | solo), half a
+        // column between groups. Must match the 92px cell × `k` of ui/inspector.slint.
+        if n == Node::Amp && self.insp_section == 0 {
+            const GAP: f32 = 0.5;
+            let mut rows = Vec::with_capacity(self.insp_rows.len());
+            let mut col = 0f32;
+            let mut last = "";
+            for r in &self.insp_rows {
+                let g = amp_head_group(r.param.prm);
+                if g != last && !last.is_empty() {
+                    col += GAP;
+                }
+                let first = g != last;
+                last = g;
+                let v = self.edit.get(*r);
+                rows.push(ParamRow {
+                    group: s(g),
+                    show_group: first,
+                    // the caption already says "Solo": "Boost", "Level" underneath
+                    name: s(param_name(r.param).strip_prefix("Solo ").unwrap_or(&param_name(r.param))),
+                    value: v as i32,
+                    min: r.param.min as i32,
+                    max: r.param.max as i32,
+                    display: s(param_text(r.param, v)),
+                    is_enum: !r.param.labels.is_empty(),
+                    is_switch: is_switch(r.param),
+                    col,
+                    span: 1,
+                    py: 40.0,
+                    gw: 0.0,
+                });
+                col += 1.0;
+            }
+            // caption width: from a group's first cell to its last
+            for i in 0..rows.len() {
+                if rows[i].show_group {
+                    let end = rows[i..].iter().skip(1).position(|x| x.show_group).map_or(rows.len(), |j| i + 1 + j);
+                    rows[i].gw = end as f32 - i as f32;
+                }
+            }
+            ui.set_insp_cols(col);
+            ui.set_insp_head_row(true);
+            ui.set_insp_params(ModelRc::new(VecModel::from(rows)));
+            ui.set_insp_params_h(40.0 + 92.0);
+            self.refresh_extras();
+            return;
+        }
+        ui.set_insp_cols(8.0);
+        ui.set_insp_head_row(false);
         // Grid layout, computed here so the UI only places cells: a flow of COLS columns where
         // knobs and switches take one cell and lists take two; a group change closes the row
         // and adds a caption.
@@ -846,6 +1153,7 @@ impl App {
                 col = 0;
             }
             rows.push(ParamRow {
+                gw: 0.0,
                 group: s(nice(&g)),
                 show_group: show,
                 name: s(param_name(r.param)),
@@ -855,7 +1163,7 @@ impl App {
                 display: s(param_text(r.param, v)),
                 is_enum,
                 is_switch: switch,
-                col: c,
+                col: c as f32,
                 span,
                 py,
             });
@@ -936,6 +1244,19 @@ impl App {
         self.after_edit();
     }
 
+    /// Apply a ready-made chain order; block settings and on/off stay as they are.
+    fn apply_chain_preset(&mut self, i: usize) {
+        let Some(p) = chain::CHAIN_PRESETS.get(i) else { return };
+        if p.routing == self.routing() {
+            return;
+        }
+        let rb = self.panel.routing_block;
+        self.set_raw(rb, 0, &p.routing.to_bytes());
+        self.refresh_rig();
+        self.after_edit();
+        self.toast(format!("Chain: {}", p.name), false);
+    }
+
     fn drop_pedal(&mut self, from: usize, gap: usize) {
         let rt = self.routing();
         match rt.moved(from, gap) {
@@ -1014,13 +1335,12 @@ impl App {
                 let ui = self.ui();
                 ui.set_audio_host(s(&e.info.host));
                 ui.set_audio_device(s(dev_label(self.audio_cfg.output.as_deref(), "System default")));
-                ui.set_audio_input(s(dev_label(e.info.input.as_deref(), "None (DI)")));
+                ui.set_audio_input(s(input_label(e.info.input.as_deref(), self.audio_cfg.channel)));
                 ui.set_audio_latency(e.info.latency_ms);
                 ui.set_audio_running(true);
-                if e.info.input.is_none() && !self.di_on {
-                    self.set_di(true);
-                }
-                self.tuner = Some(haze_dsp::Tuner::new(e.fs()));
+                let mut t = haze_dsp::Tuner::new(e.fs());
+                t.set_reference(self.tu.reference as f32);
+                self.tuner = Some(t);
                 self.engine = Some(e);
                 // a fresh chain: looper memory and the user IR went with the old one
                 self.loop_frames = 0;
@@ -1028,7 +1348,7 @@ impl App {
                 self.sync_dsp();
                 ui.set_ir_name(s("built-in (per amp)"));
                 ui.set_di_name(s("built-in riff"));
-                if ui.get_practice_open() {
+                if ui.get_page() == 6 {
                     self.ensure_loop_buffer();
                 }
                 self.meter_timer.start(TimerMode::Repeated, Duration::from_millis(33), || with_app(|a| a.meter_frame()));
@@ -1068,8 +1388,10 @@ impl App {
         // meter ballistics: instant rise, ~300 ms fall; snaps to 0 so a silent meter stops
         // changing (an endless geometric decay would repaint the bar every frame)
         let fall = |cur: f32, new: f32| if new > cur { new } else if cur < 0.002 { 0.0 } else { cur * 0.82 };
-        ui.set_in_level(fall(ui.get_in_level(), haze_dsp::Meters::take_peak(&m.in_peak)));
-        ui.set_out_level(fall(ui.get_out_level(), haze_dsp::Meters::take_peak(&m.out_peak)));
+        let (ip, op) = (haze_dsp::Meters::take_peak(&m.in_peak), haze_dsp::Meters::take_peak(&m.out_peak));
+        audio_debug(&m, &self.dsp, ip, op);
+        ui.set_in_level(fall(ui.get_in_level(), ip));
+        ui.set_out_level(fall(ui.get_out_level(), op));
         for (i, flag) in [&m.in_clip, &m.out_clip].into_iter().enumerate() {
             if flag.swap(0, std::sync::atomic::Ordering::Relaxed) != 0 {
                 self.clip_hold[i] = 45;
@@ -1079,34 +1401,86 @@ impl App {
         ui.set_in_clip(self.clip_hold[0] > 0);
         ui.set_out_clip(self.clip_hold[1] > 0);
         self.meter_tick = self.meter_tick.wrapping_add(1);
-        if ui.get_practice_open() {
+        {
             use std::sync::atomic::Ordering::Relaxed;
+            // the status bar shows the looper on every page; progress, steps and meters only
+            // change while the Practice page shows them
+            let on_page = ui.get_page() == 6;
             let st = m.loop_state.load(Relaxed) as i32;
             let (pos, len) = (m.loop_pos.load(Relaxed) as f32, m.loop_len.load(Relaxed) as f32);
             let fs = self.engine.as_ref().map_or(48000.0, |e| e.fs());
             ui.set_loop_state(st);
+            ui.set_loop_wait(m.loop_wait.load(Relaxed) as i32);
             // recording fills the memory, playback sweeps the loop
             let (prog, secs) = if st == 1 { (len / self.loop_frames.max(1) as f32, len / fs) } else if len > 0.0 { (pos / len, len / fs) } else { (0.0, 0.0) };
-            ui.set_loop_progress(prog);
-            ui.set_loop_time(s(format!("{secs:.1} s")));
-            ui.set_drum_step(m.drum_step.load(Relaxed) as i32);
+            let t = s(format!("{secs:.1} s"));
+            if ui.get_loop_time() != t {
+                ui.set_loop_time(t);
+            }
+            if on_page {
+                ui.set_loop_progress(prog);
+                ui.set_drum_step(m.drum_step.load(Relaxed) as i32);
+            }
+            if let Some(p) = self.prui.as_mut() {
+                p.meters(&m, on_page);
+            }
+        }
+        // the speed trainer moves the tempo from the audio thread
+        let bpm = self.dsp.get(haze_dsp::P::Bpm).round() as i32;
+        if bpm != self.pr.bpm {
+            self.pr.bpm = bpm;
+            ui.set_bpm(bpm);
         }
         if let Some(t) = self.tuner.as_mut() {
             for x in fresh {
                 t.push(x);
             }
+            let page = ui.get_page() == 4;
             // pitch every other frame (15 Hz) is plenty for a tuner
             if self.meter_tick % 2 == 0 {
-                match t.estimate() {
-                    Some(p) => {
-                        ui.set_tuner_active(true);
-                        ui.set_tuner_note(s(format!("{}{}", p.note, p.octave)));
-                        ui.set_tuner_cents(p.cents);
+                let p = t.estimate();
+                // the played note for the pitch-aware effects (harmonist, intelligent ring mod)
+                self.dsp.set(haze_dsp::P::PitchMidi, p.as_ref().map_or(-1.0, |p| p.midi_f));
+                tuner_readout(&mut self.tu, &ui, p, page);
+            }
+            // the strobe moves every frame between estimates, only while the page shows it
+            if page {
+                if self.tu.needle.is_none() {
+                    self.tu.drawn = None;
+                }
+                if let (Some(n), Some(d)) = (self.tu.needle, self.tu.drawn) {
+                    // halfway per frame: settles in ~4 frames (130 ms), no stair steps at 15 Hz
+                    let nd = d + (n - d) * 0.5;
+                    if (nd - d).abs() > 0.02 {
+                        ui.set_tuner_needle(nd);
                     }
-                    None => ui.set_tuner_active(false),
+                    self.tu.drawn = Some(nd);
+                }
+                if let Some(n) = self.tu.needle {
+                    self.tu.strobe = (self.tu.strobe + n.clamp(-50.0, 50.0) * 0.004).rem_euclid(1.0);
+                    ui.set_tuner_strobe(self.tu.strobe);
                 }
             }
         }
+    }
+
+    /// Bring the PC FX page up to date (built on the first visit).
+    fn show_pcfx(&mut self) {
+        let ui = self.ui();
+        match &self.pcfx {
+            Some(m) => m.refresh(&self.dsp),
+            None => {
+                let m = crate::pcfx::PcFxUi::new(&self.dsp);
+                ui.set_pcfx_cards(m.model());
+                self.pcfx = Some(m);
+            }
+        }
+        ui.set_pcfx_bpm(self.dsp.get(haze_dsp::P::Bpm).round() as i32);
+    }
+
+    fn set_tuner_mute(&mut self, on: bool) {
+        self.dsp.set(haze_dsp::P::Mute, on as i32 as f32);
+        self.ui().set_tuner_mute(on);
     }
 
     fn set_di(&mut self, on: bool) {
@@ -1155,6 +1529,22 @@ impl App {
         let bpm = bpm.clamp(40, 240);
         self.dsp.set(haze_dsp::P::Bpm, bpm as f32);
         self.ui().set_bpm(bpm);
+        self.pr.bpm = bpm;
+        self.save_practice_soon();
+    }
+
+    /// Change practice settings: apply to the DSP + UI and remember them.
+    fn practice(&mut self, f: impl FnOnce(&mut PracticeCfg)) {
+        f(&mut self.pr);
+        self.pr.apply(&self.dsp, &self.ui());
+        if let Some(p) = &self.prui {
+            p.show(&self.pr);
+        }
+        self.save_practice_soon();
+    }
+
+    fn save_practice_soon(&self) {
+        self.pr_save.start(TimerMode::SingleShot, Duration::from_millis(600), || with_app(|a| a.pr.save(a.lib.root())));
     }
 
     /// Tap tempo: average of the last taps (reset after 2 s). Sets the drum BPM and the delay
@@ -1199,7 +1589,7 @@ impl App {
         let path = path.trim().trim_matches(|c| c == '\'' || c == '"');
         let path = std::path::Path::new(path);
         let Some(e) = self.engine.as_mut() else {
-            self.toast("Switch to Standalone mode first (PC engine)", true);
+            self.toast("Switch to the PC engine first", true);
             return;
         };
         let fs = e.fs();
@@ -1251,16 +1641,7 @@ impl App {
                 _ => {}
             }
         }
-        let voicing = self.dsp_voicing.unwrap_or_else(|| match amp_family(e.get(self.panel.amp_type)) {
-            Some((0, _)) => 0,
-            Some((1, false)) => 1,
-            Some((1, true)) => 2,
-            Some((2, _)) => 3,
-            Some((3, _)) => 4,
-            Some((4, false)) => 5,
-            Some((4, true)) => 6,
-            _ => 1,
-        });
+        let voicing = self.dsp_voicing.unwrap_or_else(|| voicing_of(e.get(self.panel.amp_type)));
         d.set(P::AmpVoicing, voicing as f32);
         d.set(P::CabIr, if self.user_ir { 3.0 } else { match voicing { 0 => 0.0, 1 | 2 => 1.0, _ => 2.0 } });
         d.set(P::AmpSag, if voicing >= 3 { 0.45 } else { 0.25 });
@@ -1279,25 +1660,35 @@ impl App {
 
         let bt = ty(Node::Booster);
         d.set(P::DriveOn, self.node_on(node(Node::Booster)) as i32 as f32);
-        let model = if bt.contains("CENTA") || bt.contains("KLON") {
-            1
-        } else if bt.contains("BLUES") {
-            2
-        } else if bt.contains("RAT") || bt.contains("DST") || bt.contains("DIST") {
-            3
-        } else if bt.contains("FUZZ") || bt.contains("MUFF") {
-            4
-        } else if bt.contains("METAL") || bt.contains("MT") || bt.contains("HM") {
-            5
-        } else if bt.contains("SCREAM") || bt.contains("OD") || bt.contains("TS") {
-            0
-        } else {
-            2
+        // the Katana's 24 booster types on the 9 drive models (`blocks::DRIVE_MODELS`); the
+        // boosts stay clean: a MID BOOST ahead of a high-gain amp tightens, it never fuzzes
+        let model = match bt.as_str() {
+            "CLEAN BOOST" => 6,
+            "MID BOOST" => 7,
+            "TREBLE BOOST" => 8,
+            "CENTA OD" => 1,
+            "BLUES DRIVE" | "CRUNCH OD" | "NATURAL OD" => 2,
+            "FAT DS" | "LEAD DS" | "DISTORTION" | "RAT" | "GUV DS" | "DST+" => 3,
+            "OCT FUZZ" | "'60S FUZZ" | "MUFF FUZZ" => 4,
+            "METAL DS" | "METAL ZONE" | "HM-2" | "METAL CORE" => 5,
+            _ => 0,
         };
         d.set(P::DriveModel, model as f32);
         d.set(P::DriveAmt, knob(Node::Booster, &["DRIVE"], 0.5));
         d.set(P::DriveTone, knob(Node::Booster, &["TONE"], 0.5));
         d.set(P::DriveLevel, knob(Node::Booster, &["LEVEL"], 0.5));
+
+        // a param by block and PRM name, raw value (0 when the patch has no such param)
+        let raw = |block: &str, prm: &str| {
+            katana_core::map::block_index(block)
+                .and_then(|b| PATCH_BLOCKS[b].params.iter().find(|d| d.prm == prm).map(|param| e.get(ParamRef { block: b, param })))
+                .unwrap_or(0) as f32
+        };
+        // pre-amp placement follows the chain pattern the patch uses
+        let layout = self.routing().layout();
+        let at = |n: Node| layout.iter().position(|x| *x == n).unwrap_or(usize::MAX);
+        let pre_amp = |n: Node| at(n) < at(Node::Amp);
+        let fx_block = |n: Node| if n == Node::Mod { "Fx(1)" } else { "Fx(2)" };
 
         // MOD block, or FX when MOD is off
         let mod_kind = |t: &str| {
@@ -1311,6 +1702,10 @@ impl App {
                 Some(3)
             } else if t.contains("ROTARY") || t.contains("UNI-V") || t.contains("VIBE") {
                 Some(4)
+            } else if t.contains("FLNGR") {
+                Some(1)
+            } else if t == "DC-30" {
+                Some(0)
             } else {
                 None
             }
@@ -1319,37 +1714,226 @@ impl App {
         d.set(P::ModOn, pick.is_some() as i32 as f32);
         if let Some((n, k)) = pick {
             d.set(P::ModType, k as f32);
+            d.set(P::ModPre, pre_amp(n) as i32 as f32);
             d.set(P::ModRate, 0.1 + 7.9 * knob(n, &["RATE"], 0.3).powi(2));
             d.set(P::ModDepth, knob(n, &["DEPTH"], 0.5));
             d.set(P::ModMix, if k == 3 { 1.0 } else { 0.5 });
         }
 
-        d.set(P::DelayOn, self.node_on(node(Node::Delay)) as i32 as f32);
-        if let Some(r) = find(Node::Delay, &["TIME"]) {
-            let v = e.get(r) as f32;
-            d.set(P::DelayMs, if r.param.max >= 1000 { v } else { 20.0 + norm(r) * 1980.0 });
+        // the other MOD / FX types: one effect unit per slot (`haze_dsp::fxunit::FX_KINDS`)
+        for (slot, n) in [Node::Mod, Node::Fx].into_iter().enumerate() {
+            use haze_dsp::{EqKey, Params};
+            let b = fx_block(n);
+            let v = |prm: &str| raw(b, &format!("PRM_FX1_{prm}"));
+            let pct = |prm: &str| v(prm) / 100.0;
+            // BOSS effect LEVELs that start at 50 have unity there (100 = +6 dB)
+            let lvl = |prm: &str| v(prm) / 50.0;
+            let t = ty(n);
+            let (kind, vals): (i32, [f32; 10]) = match t.as_str() {
+                _ if !self.node_on(node(n)) => (0, [0.0; 10]),
+                // POLARITY 0 = DOWN, 1 = UP (the unit's V5 is 1 = down)
+                "T.WAH" => (1, [0.0, pct("TWAH_FREQ"), pct("TWAH_PEAK"), pct("TWAH_SENS"), 1.0, 1.0 - v("TWAH_POLARITY"), lvl("TWAH_LEVEL"), pct("TWAH_D_LEVEL"), 0.0, 1.0]),
+                "AUTO WAH" => (1, [1.0, pct("AWAH_FREQ"), pct("AWAH_PEAK"), 0.1 + 0.1 * v("AWAH_RATE"), pct("AWAH_DEPTH"), 0.0, lvl("AWAH_LEVEL"), pct("AWAH_D_LEVEL"), 0.0, 1.0]),
+                "PEDAL WAH" => (1, [2.0, pct("SUBWAH_PDLPOS"), 0.45, 0.0, 0.0, 0.0, pct("SUBWAH_E_LEVEL"), pct("SUBWAH_D_LEVEL"), pct("SUBWAH_MIN"), pct("SUBWAH_MAX")]),
+                "WAH 95E" => (1, [2.0, pct("EVH_WAH_PEDAL_POS"), 0.5, 0.0, 0.0, 0.0, pct("EVH_WAH_EFFECT_LEVEL"), pct("EVH_WAH_DIRECT_MIX"), pct("EVH_WAH_PEDAL_MIN"), pct("EVH_WAH_PEDAL_MAX")]),
+                "OCTAVE" => (2, [-12.0, pct("OCTAVE_LEVEL"), 0.0, 0.0, pct("OCTAVE_D_LEVEL"), 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "HEAVY OCTAVE" => (2, [-12.0, pct("HEAVY_OCTAVE_1OCT_LEVEL"), -24.0, pct("HEAVY_OCTAVE_2OCT_LEVEL"), pct("HEAVY_OCTAVE_DIRECT_LEVEL"), 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "PITCH SHIFTER" => {
+                    let two = v("PITCHSHIFT_VOICE") >= 1.0;
+                    (2, [
+                        v("PITCHSHIFT_PITCH1") + 0.01 * v("PITCHSHIFT_FINE1"),
+                        pct("PITCHSHIFT_LEVEL1"),
+                        v("PITCHSHIFT_PITCH2") + 0.01 * v("PITCHSHIFT_FINE2"),
+                        if two { pct("PITCHSHIFT_LEVEL2") } else { 0.0 },
+                        pct("PITCHSHIFT_D_LEVEL"),
+                        pct("PITCHSHIFT_FEEDBACK"),
+                        v("PITCHSHIFT_PREDELAY1"),
+                        0.0, 0.0, 0.0,
+                    ])
+                }
+                // HARMONY 0..28 = −2 oct .. +2 oct in scale steps, 14 = the played note
+                "HARMONIST" => {
+                    let two = v("HARMONIST_VOICE") >= 1.0;
+                    let steps = |prm: &str| (v(prm) as i32).min(28) as f32 - 14.0;
+                    (2, [
+                        steps("HARMONIST_HARMONY1"),
+                        pct("HARMONIST_LEVEL1"),
+                        steps("HARMONIST_HARMONY2"),
+                        if two { pct("HARMONIST_LEVEL2") } else { 0.0 },
+                        pct("HARMONIST_D_LEVEL"),
+                        pct("HARMONIST_FEEDBACK"),
+                        v("HARMONIST_PREDELAY1"),
+                        1.0, 0.0, 0.0,
+                    ])
+                }
+                "PEDAL BEND" => (2, [v("PEDAL_BEND_PITCH_MAX") * pct("PEDAL_BEND_PEDAL_POSITION"), pct("PEDAL_BEND_EFFECT_LEVEL"), 0.0, 0.0, pct("PEDAL_BEND_DIRECT_MIX"), 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "SLOW GEAR" => (3, [pct("SLOWGEAR_SENS"), 0.05 + 0.025 * v("SLOWGEAR_RISETIME"), 1.5 * pct("SLOWGEAR_LEVEL"), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "VIBRATO" => (4, [0.2 + 0.1 * v("VIBRATO_RATE"), pct("VIBRATO_DEPTH"), lvl("VIBRATO_LEVEL"), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "RING MOD" => {
+                    let smart = v("RINGMOD_MODE") >= 1.0;
+                    let f = pct("RINGMOD_FREQ");
+                    (5, [if smart { 0.25 + 3.75 * f } else { 20.0 * 100f32.powf(f) }, smart as i32 as f32, pct("RINGMOD_E_LEVEL"), pct("RINGMOD_D_LEVEL"), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                }
+                "HUMANIZER" => (6, [
+                    v("HUMANIZER_VOWEL1"),
+                    v("HUMANIZER_VOWEL2"),
+                    0.1 + 0.1 * v("HUMANIZER_RATE"),
+                    pct("HUMANIZER_DEPTH"),
+                    v("HUMANIZER_MODE"),
+                    pct("HUMANIZER_SENS"),
+                    pct("HUMANIZER_MANUAL"),
+                    1.4 * pct("HUMANIZER_LEVEL"),
+                    0.0, 0.0,
+                ]),
+                "SLICER" => (7, [v("SLICER_PATTERN"), 2.0 + 0.22 * v("SLICER_RATE"), lvl("SLICER_EFFECT_LEVEL"), pct("SLICER_DIRECT_LEVEL"), 0.6, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "AC.GUITAR SIM" => (8, [0.24 * v("ACSIM_LOW") - 2.0, 8.0 * pct("ACSIM_BODY"), 0.24 * v("ACSIM_TOP") + 4.0, lvl("ACSIM_LEVEL"), -6.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "AC.PROCESSOR" => {
+                    let body = [3.0, 5.0, 2.0, 6.0][(v("ACPROCESS_TYPE") as usize).min(3)];
+                    (8, [0.24 * v("ACPROCESS_BASS"), body, 0.24 * v("ACPROCESS_TREBLE") + 2.0, lvl("ACPROCESS_LEVEL"), 0.24 * v("ACPROCESS_MID"), 0.0, 0.0, 0.0, 0.0, 0.0])
+                }
+                "GUITAR SIM" => {
+                    // (low, body, top, mid) of each pickup / body change
+                    let (lo, bo, tp, md) = [(3.0, 3.0, -4.0, 2.0), (-3.0, -1.0, 5.0, -3.0), (-2.0, 1.0, 3.0, 0.0), (1.0, 6.0, 0.0, -2.0), (0.0, 6.0, 1.0, -2.0), (-2.0, 6.0, 5.0, -6.0), (-3.0, 6.0, 6.0, -7.0), (-4.0, 5.0, 4.0, -6.0)][(v("GTRSIM_TYPE") as usize).min(7)];
+                    (8, [lo + 0.24 * v("GTRSIM_LOW"), bo * (0.5 + pct("GTRSIM_BODY")), tp + 0.24 * v("GTRSIM_HIGH"), lvl("GTRSIM_LEVEL"), md, 0.0, 0.0, 0.0, 0.0, 0.0])
+                }
+                _ => (0, [0.0; 10]),
+            };
+            d.set_i(Params::fx(slot, EqKey::On), (kind > 0) as i32 as f32);
+            if kind > 0 {
+                d.set_i(Params::fx(slot, EqKey::Kind), kind as f32);
+                d.set_i(Params::fx(slot, EqKey::Pre), pre_amp(n) as i32 as f32);
+                for (k, x) in vals.into_iter().enumerate() {
+                    d.set_i(Params::fx(slot, EqKey::V(k)), x);
+                }
+            }
         }
-        d.set(P::DelayFeedback, 0.9 * knob(Node::Delay, &["FEEDBACK", "F.BACK"], 0.35));
-        d.set(P::DelayMix, 0.8 * knob(Node::Delay, &["EFFECT LEVEL", "LEVEL"], 0.4));
-        let dt = ty(Node::Delay);
-        d.set(P::DelayPingPong, (dt.contains("PAN") || dt.contains("STEREO") || dt.contains("PING")) as i32 as f32);
 
-        d.set(P::ReverbOn, self.node_on(node(Node::Reverb)) as i32 as f32);
-        let rt = ty(Node::Reverb);
-        d.set(
-            P::ReverbType,
-            if rt.contains("HALL") {
-                1.0
-            } else if rt.contains("SPRING") {
-                2.0
-            } else if rt.contains("MODULATE") || rt.contains("SHIMMER") {
-                3.0
+        // COMP / LIMITER in the MOD or FX slot
+        let comp = [Node::Mod, Node::Fx].into_iter().find(|n| {
+            let t = ty(*n);
+            self.node_on(node(*n)) && (t == "COMP" || t == "LIMITER")
+        });
+        d.set(P::CompOn, comp.is_some() as i32 as f32);
+        if let Some(n) = comp {
+            let b = fx_block(n);
+            let v = |prm: &str| raw(b, prm);
+            d.set(P::CompPre, pre_amp(n) as i32 as f32);
+            let (thresh, ratio, att, rel, level, tone) = if ty(n) == "COMP" {
+                // BOSS COMP family: SUSTAIN lowers the threshold and raises the ratio together
+                let s = v("PRM_FX1_ADCOMP_SUSTAIN");
+                let soft = matches!(v("PRM_FX1_ADCOMP_TYPE") as i32, 2 | 6);
+                let colour = match v("PRM_FX1_ADCOMP_TYPE") as i32 {
+                    1 => 3.0,
+                    5 => -3.0,
+                    _ => 0.0,
+                };
+                let ratio = (2.0 + 0.08 * s) * if soft { 0.6 } else { 1.0 };
+                (-10.0 - 0.35 * s, ratio.max(1.2), 2.0 + 0.5 * v("PRM_FX1_ADCOMP_ATTACK"), 180.0, v("PRM_FX1_ADCOMP_LEVEL"), 0.2 * v("PRM_FX1_ADCOMP_TONE") + colour)
             } else {
-                0.0
-            },
-        );
-        d.set(P::ReverbDecay, knob(Node::Reverb, &["TIME"], 0.5));
-        d.set(P::ReverbMix, 0.9 * knob(Node::Reverb, &["EFFECT LEVEL", "LEVEL"], 0.3));
+                const RATIOS: [f32; 18] = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.3, 2.6, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 10.0, 20.0, 40.0, 100.0];
+                (
+                    -0.4 * v("PRM_FX1_LIMITER_THRESHOLD"),
+                    RATIOS[(v("PRM_FX1_LIMITER_RATIO") as usize).min(17)],
+                    0.1 + 0.3 * v("PRM_FX1_LIMITER_ATTACK"),
+                    20.0 + 9.8 * v("PRM_FX1_LIMITER_RELEASE"),
+                    v("PRM_FX1_LIMITER_LEVEL"),
+                    0.0,
+                )
+            };
+            // auto make-up for a guitar playing around −18 dBFS, LEVEL 50 = unity on top
+            let auto = (-18.0 - thresh).max(0.0) * (1.0 - 1.0 / ratio);
+            d.set(P::CompThreshDb, thresh);
+            d.set(P::CompRatio, ratio);
+            d.set(P::CompAttackMs, att);
+            d.set(P::CompReleaseMs, rel);
+            d.set(P::CompMakeupDb, auto + 0.3 * (level - 50.0));
+            d.set(P::CompToneDb, tone);
+        }
+
+        // EQ slots: EQ, EQ 2 and a PARAMETRIC / GRAPHIC EQ in the MOD or FX slot
+        {
+            use crate::eqcurve::{freq_index, high_cut_index, low_cut_index, q_index};
+            use haze_dsp::{EqKey, Params};
+            let set = |slot: usize, on: bool, pre: bool, block: &str, pfx: &str| {
+                d.set_i(Params::eq(slot, EqKey::On), on as i32 as f32);
+                if !on {
+                    return;
+                }
+                let v = |name: &str| raw(block, &format!("{pfx}{name}"));
+                let geq = if pfx.starts_with("PRM_FX1") { pfx.contains("GEQ") } else { v("TYPE") == 1.0 };
+                let mut vals = [0f32; 11];
+                if geq {
+                    let gp = if pfx.starts_with("PRM_FX1") { pfx.to_string() } else { format!("{pfx}GEQ_") };
+                    for (i, x) in vals.iter_mut().take(10).enumerate() {
+                        *x = raw(block, &format!("{gp}BAND{}", i + 1));
+                    }
+                    vals[10] = raw(block, &format!("{gp}LEVEL"));
+                } else {
+                    let i = |name: &str| v(name) as i16;
+                    vals = [
+                        low_cut_index(i("LOW_CUT")).unwrap_or(0.0),
+                        v("LOW_GAIN"),
+                        freq_index(i("LOWMID_FREQ")),
+                        q_index(i("LOWMID_Q")),
+                        v("LOWMID_GAIN"),
+                        freq_index(i("HIGHMID_FREQ")),
+                        q_index(i("HIGHMID_Q")),
+                        v("HIGHMID_GAIN"),
+                        v("HIGH_GAIN"),
+                        high_cut_index(i("HIGH_CUT")).unwrap_or(0.0),
+                        v("LEVEL"),
+                    ];
+                }
+                d.set_i(Params::eq(slot, EqKey::Pre), pre as i32 as f32);
+                d.set_i(Params::eq(slot, EqKey::Kind), geq as i32 as f32);
+                for (k, x) in vals.iter().enumerate() {
+                    d.set_i(Params::eq(slot, EqKey::V(k)), *x);
+                }
+            };
+            let rt = self.routing();
+            set(0, self.node_on(node(Node::Eq)), !rt.eq_post, "Patch_0", "PRM_EQ_");
+            set(1, raw("Eq(2)", "PRM_EQ_SW") != 0.0, raw("Patch_1", "PRM_POSITION_EQ2") == 0.0, "Eq(2)", "PRM_EQ_");
+            let fx_eq = [Node::Mod, Node::Fx].into_iter().find(|n| self.node_on(node(*n)) && ty(*n).contains(" EQ"));
+            match fx_eq {
+                Some(n) => {
+                    let pfx = if ty(n).contains("GRAPHIC") { "PRM_FX1_GEQ_" } else { "PRM_FX1_PEQ_" };
+                    set(2, true, pre_amp(n), fx_block(n), pfx);
+                }
+                None => set(2, false, false, "", ""),
+            }
+        }
+
+        // DELAY and DELAY 2 in series, the Katana's types and levels (100 = unity)
+        for (n, block, ps) in [
+            (Node::Delay, "Delay(1)", [P::DelayOn, P::DelayType, P::DelayMs, P::DelayFeedback, P::DelayMix, P::DelayDirect, P::DelayHiCut, P::DelayModRate, P::DelayModDepth]),
+            (Node::Delay2, "Delay(2)", [P::Delay2On, P::Delay2Type, P::Delay2Ms, P::Delay2Feedback, P::Delay2Mix, P::Delay2Direct, P::Delay2HiCut, P::Delay2ModRate, P::Delay2ModDepth]),
+        ] {
+            let v = |prm: &str| raw(block, prm);
+            d.set(ps[0], self.node_on(node(n)) as i32 as f32);
+            d.set(ps[1], v("PRM_DLY_TYPE"));
+            d.set(ps[2], v("PRM_DLY_COMMON_DLY_TIME").max(1.0));
+            d.set(ps[3], v("PRM_DLY_COMMON_FEEDBACK") / 100.0);
+            d.set(ps[4], v("PRM_DLY_COMMON_EFFECT_LEVEL") / 100.0);
+            d.set(ps[5], v("PRM_DLY_COMMON_DIRECT_LEVEL") / 100.0);
+            d.set(ps[6], crate::eqcurve::high_cut_index(v("PRM_DLY_COMMON_HICUT") as i16).unwrap_or(0.0));
+            d.set(ps[7], 0.05 + 0.04 * v("PRM_DLY_MOD_RATE"));
+            d.set(ps[8], v("PRM_DLY_MOD_DEPTH") / 100.0);
+        }
+
+        // REVERB: TIME 1..100 is 0.1..10 s
+        {
+            use crate::eqcurve::{high_cut_index, low_cut_index};
+            let v = |prm: &str| raw("Patch_1", prm);
+            d.set(P::ReverbOn, self.node_on(node(Node::Reverb)) as i32 as f32);
+            d.set(P::ReverbType, v("PRM_REVERB_TYPE"));
+            d.set(P::ReverbTime, 0.1 * v("PRM_REVERB_TIME").max(1.0));
+            d.set(P::ReverbPreMs, v("PRM_REVERB_PREDELAY"));
+            d.set(P::ReverbLowCut, low_cut_index(v("PRM_REVERB_LOWCUT") as i16).unwrap_or(0.0));
+            d.set(P::ReverbHighCut, high_cut_index(v("PRM_REVERB_HICUT") as i16).unwrap_or(0.0));
+            d.set(P::ReverbDensity, v("PRM_REVERB_DENSITY") / 10.0);
+            d.set(P::ReverbMix, v("PRM_REVERB_EFFECT_LEVEL") / 100.0);
+            d.set(P::ReverbDirect, v("PRM_REVERB_DIRECT_LEVEL") / 100.0);
+        }
         self.ui().set_dsp_voicing(self.dsp_voicing.unwrap_or(-1));
     }
 
@@ -1721,6 +2305,71 @@ fn is_switch(d: &katana_core::map::ParamDef) -> bool {
     d.labels.is_empty() && d.min == 0 && d.max == 1
 }
 
+/// `HAZE_AUDIO_DEBUG=1`: every 2 s print input/output peaks and the engine's error counters
+/// to stderr (one line, from the 30 Hz meter timer; nothing at all when unset).
+fn audio_debug(m: &haze_dsp::Meters, d: &haze_dsp::Params, ip: f32, op: f32) {
+    use std::cell::Cell;
+    use std::sync::atomic::Ordering::Relaxed;
+    thread_local! {
+        static ON: bool = std::env::var_os("HAZE_AUDIO_DEBUG").is_some();
+        static ACC: Cell<(f32, f32, u32)> = const { Cell::new((0.0, 0.0, 0)) };
+    }
+    if !ON.with(|x| *x) {
+        return;
+    }
+    ACC.with(|c| {
+        let (i, o, n) = c.get();
+        let (i, o, n) = (i.max(ip), o.max(op), n + 1);
+        if n < 60 {
+            c.set((i, o, n));
+            return;
+        }
+        let db = |x: f32| 20.0 * (x + 1e-9).log10();
+        eprintln!(
+            "audio: in {:.1} dBFS (input {}) out {:.1} dBFS underruns {} skips {} in_errors {} xruns {} load {:.2} rt {:#06b}",
+            db(i),
+            m.in_channel.load(Relaxed) + 1,
+            db(o),
+            m.ring_underruns.load(Relaxed),
+            m.ring_skips.load(Relaxed),
+            m.in_errors.load(Relaxed),
+            m.xruns.load(Relaxed),
+            f32::from_bits(m.load.load(Relaxed)),
+            m.rt.load(Relaxed)
+        );
+        if o > 1.0 {
+            use haze_dsp::P::*;
+            let ps = [
+                ("lim", Limiter), ("outdb", OutGainDb), ("gate", GateOn), ("gth", GateThreshDb), ("voi", AmpVoicing),
+                ("gain", AmpGain), ("bass", AmpBass), ("mid", AmpMid), ("treb", AmpTreble), ("pres", AmpPresence),
+                ("res", AmpResonance), ("mast", AmpMaster), ("sag", AmpSag), ("cab", CabOn), ("ir", CabIr),
+                ("drv", DriveOn), ("dm", DriveModel), ("da", DriveAmt), ("dt", DriveTone), ("dl", DriveLevel),
+                ("comp", CompOn), ("cpre", CompPre), ("cth", CompThreshDb), ("crat", CompRatio), ("cmk", CompMakeupDb),
+                ("mod", ModOn), ("mpre", ModPre), ("mt", ModType), ("mr", ModRate), ("md", ModDepth), ("mm", ModMix),
+                ("dly", DelayOn), ("dty", DelayType), ("dms", DelayMs), ("dfb", DelayFeedback), ("dmix", DelayMix),
+                ("dly2", Delay2On), ("d2ty", Delay2Type), ("d2ms", Delay2Ms), ("d2fb", Delay2Feedback), ("d2mix", Delay2Mix),
+                ("rev", ReverbOn), ("rt", ReverbType), ("rtime", ReverbTime), ("rpre", ReverbPreMs), ("rm", ReverbMix), ("drum", DrumOn),
+            ];
+            let txt: Vec<String> = ps.iter().map(|(n, p)| format!("{n}={}", d.get(*p))).collect();
+            let eq: Vec<String> = (0..haze_dsp::params::EQ_SLOTS)
+                .map(|i| format!("{}", d.get_i(haze_dsp::Params::eq(i, haze_dsp::EqKey::On))))
+                .collect();
+            eprintln!("audio params: {} eq_slots_on=[{}]", txt.join(" "), eq.join(","));
+        }
+        c.set((0.0, 0.0, 0));
+    });
+}
+
+/// Group of an amp-head control on the Amp tab: drive, tone stack, output, solo.
+fn amp_head_group(prm: &str) -> &'static str {
+    match prm {
+        "PRM_PREAMP_A_GAIN" => "Preamp",
+        "PRM_PREAMP_A_BASS" | "PRM_PREAMP_A_MIDDLE" | "PRM_PREAMP_A_TREBLE" | "PRM_PREAMP_A_PRESENCE" => "Tone",
+        "PRM_PREAMP_A_SOLO_SW" | "PRM_PREAMP_A_SOLO_LEVEL" => "Solo",
+        _ => "Output",
+    }
+}
+
 /// Inspector label of a parameter. One name per concept across the app: the preamp
 /// output is "Volume" (as on the amp's panel), the solo switch is "Solo Boost".
 fn param_name(d: &katana_core::map::ParamDef) -> String {
@@ -1770,6 +2419,12 @@ fn shellexpand(p: &str) -> String {
         return format!("{}/{}", std::env::var("HOME").unwrap_or_default(), rest);
     }
     p.to_string()
+}
+
+/// The engine parameters the app drives (tests read what a tone maps to).
+#[cfg(test)]
+pub fn dsp_params() -> Arc<haze_dsp::Params> {
+    APP.with(|a| a.borrow().as_ref().expect("app installed").borrow().dsp.clone())
 }
 
 fn with_app(f: impl FnOnce(&mut App)) {
@@ -1892,6 +2547,7 @@ fn bind(ui: &MainWindow) {
             a.set_node_type(n, v as i16);
         }
     }));
+    ui.on_chain_preset(|i| with_app(|a| a.apply_chain_preset(i as usize)));
     ui.on_insp_section_picked(|i| with_app(|a| {
         a.insp_section = i as usize;
         a.refresh_inspector();
@@ -1925,7 +2581,7 @@ fn bind(ui: &MainWindow) {
                 let d = if v == 0 { None } else { list.get(v as usize - 1).cloned() };
                 a.audio_cfg.input = d.as_ref().map(|d| d.id.clone());
                 save_audio_cfg(a.lib.root(), &a.audio_cfg);
-                a.ui().set_audio_input(s(dev_label(a.audio_cfg.input.as_deref(), "None (DI)")));
+                a.ui().set_audio_input(s(input_label(a.audio_cfg.input.as_deref(), a.audio_cfg.channel)));
                 match &d {
                     Some(d) if d.mic => a.toast(format!("{}: looks like a microphone — expect feedback on speakers. Use headphones!", d.label), true),
                     Some(d) => a.toast(format!("Guitar input: {}", d.label), false),
@@ -1934,6 +2590,44 @@ fn bind(ui: &MainWindow) {
                 if d.is_some() && a.di_on {
                     a.set_di(false);
                 }
+                if a.engine.is_some() {
+                    a.start_engine();
+                }
+                // interfaces have two inputs and the other one often holds a microphone:
+                // ask which one is the guitar (the picker closes after this callback)
+                if d.is_some_and(|d| d.id != "default") {
+                    Timer::single_shot(Duration::ZERO, || with_app(|a| {
+                        let cur = a.audio_cfg.channel.map_or(0, |c| c as i32 + 1);
+                        let opts = vec![
+                            Opt { value: 1, label: s(if cur == 1 { "Input 1  ✓" } else { "Input 1" }) },
+                            Opt { value: 2, label: s(if cur == 2 { "Input 2  ✓" } else { "Input 2" }) },
+                            Opt { value: 0, label: s(if cur == 0 { "Auto: louder input  ✓  (never with a mic on the other input)" } else { "Auto: louder input  (never with a mic on the other input)" }) },
+                        ];
+                        a.popup = Some(Popup::AudioCh);
+                        let ui = a.ui();
+                        ui.set_popup_title(s("Guitar plugged into which input?"));
+                        ui.set_popup_options(ModelRc::new(VecModel::from(opts)));
+                        ui.invoke_open_popup();
+                    }));
+                }
+            }
+            Some(Popup::Tuning) => {
+                a.tu.tuning = (v.max(0) as usize).min(haze_dsp::tuner::TUNINGS.len() - 1);
+                a.tu.reset_strings();
+                a.tu.save(a.lib.root());
+                a.tu.push_settings(&a.ui());
+            }
+            Some(Popup::AudioCh) => {
+                a.audio_cfg.channel = (v > 0).then(|| v as usize - 1);
+                save_audio_cfg(a.lib.root(), &a.audio_cfg);
+                a.ui().set_audio_input(s(input_label(a.audio_cfg.input.as_deref(), a.audio_cfg.channel)));
+                a.toast(
+                    match a.audio_cfg.channel {
+                        Some(c) => format!("Guitar on input {}: the other input is ignored", c + 1),
+                        None => "Auto input: follows the louder input (a mic there will feed back)".into(),
+                    },
+                    a.audio_cfg.channel.is_none(),
+                );
                 if a.engine.is_some() {
                     a.start_engine();
                 }
@@ -1993,13 +2687,22 @@ fn bind(ui: &MainWindow) {
     ui.on_audition(|| with_app(audition));
     ui.on_mode_picked(|hw| with_app(|a| {
         a.set_mode(hw);
-        a.toast(if hw { "Hardware mode: edits sync to the Katana" } else { "Standalone mode: PC DSP engine (beta), the Katana gets no edits" }, false);
+        if !hw && a.audio_cfg.input.is_none() && a.engine.is_some() {
+            // without a picked input the guitar never reaches the engine: say so up front
+            a.toast("PC engine: no guitar input yet. Click \"In:\" and pick your guitar interface (e.g. USB AUDIO CODEC); DI ▶ plays a demo riff", true);
+            return;
+        }
+        a.toast(if hw { "Amp mode: edits sync to the Katana" } else { "PC engine (beta): sound comes from this computer, the Katana gets no edits" }, false);
     }));
     ui.on_audio_device_request(|input| with_app(|a| {
         let list: Vec<haze_dsp::DeviceInfo> = haze_dsp::list_devices(input).into_iter().filter(|d| input || d.id != "default").collect();
         let mut opts = vec![Opt { value: 0, label: s(if input { "— None (DI player only)" } else { "System default (PipeWire)" }) }];
         for (i, d) in list.iter().enumerate() {
-            let warn = if d.mic { "   ⚠ microphone" } else { "" };
+            let warn = match (d.mic, d.busy) {
+                (true, _) => "   ⚠ microphone",
+                (false, true) => "   (in use)",
+                _ => "",
+            };
             opts.push(Opt { value: i as i32 + 1, label: s(format!("{}{warn}", d.label)) });
         }
         a.popup = Some(if input { Popup::AudioIn(list) } else { Popup::AudioOut(list) });
@@ -2033,16 +2736,11 @@ fn bind(ui: &MainWindow) {
         if a.hw {
             return;
         }
-        if a.ui().get_practice_open() {
+        if a.ui().get_page() == 6 {
             a.loop_action(0);
         } else {
             let on = !a.di_on;
             a.set_di(on);
-        }
-    }));
-    ui.on_practice_toggled(|open| with_app(|a| {
-        if open {
-            a.ensure_loop_buffer();
         }
     }));
     ui.on_loop_action(|x| with_app(|a| a.loop_action(x)));
@@ -2050,17 +2748,55 @@ fn bind(ui: &MainWindow) {
         a.dsp.set(haze_dsp::P::DrumOn, on as i32 as f32);
         a.ui().set_drum_on(on);
     }));
-    ui.on_drum_pattern_picked(|i| with_app(|a| {
-        a.dsp.set(haze_dsp::P::DrumPattern, i as f32);
-        a.ui().set_drum_pattern(i);
+    ui.on_drum_pattern_picked(|i| with_app(|a| a.practice(|c| c.pattern = i.clamp(0, haze_dsp::practice::USER as i32 - 1))));
+    ui.on_user_slot_picked(|u| with_app(|a| a.practice(|c| {
+        c.slot = u.clamp(0, crate::practice::USER_SLOTS as i32 - 1) as usize;
+        c.pattern = haze_dsp::practice::USER as i32;
+    })));
+    ui.on_user_len_picked(|n| with_app(|a| a.practice(|c| c.ulen[c.slot] = if n <= 12 { 12 } else { 16 })));
+    ui.on_user_copy(|| with_app(|a| a.practice(|c| c.copy_to_user())));
+    ui.on_user_clear(|| with_app(|a| a.practice(|c| c.users[c.slot] = [0; 8])));
+    ui.on_drum_cell(|r, st, v| with_app(|a| a.practice(|c| c.cell(r.max(0) as usize, st.max(0) as usize, v))));
+    ui.on_mix_set(|ch, v| with_app(|a| a.practice(|c| {
+        if let Some(m) = c.mix.get_mut(ch.max(0) as usize) {
+            *m = (v * 100.0).round().clamp(0.0, 100.0) as i32;
+        }
+    })));
+    ui.on_mix_mute(|ch| with_app(|a| a.practice(|c| {
+        if let Some(m) = c.mute.get_mut(ch.max(0) as usize) {
+            *m = !*m;
+        }
+    })));
+    ui.on_mix_reset(|ch| with_app(|a| a.practice(|c| {
+        if let Some(m) = c.mix.get_mut(ch.max(0) as usize) {
+            *m = crate::practice::UNITY;
+        }
+    })));
+    ui.on_kit_set(|k, v| with_app(|a| a.practice(|c| match k {
+        0 => c.tune = v.clamp(-6, 6),
+        1 => c.decay = v.clamp(40, 200),
+        2 => c.swing = v.clamp(0, 100),
+        3 => c.human = v.clamp(0, 100),
+        _ => c.fills = v.clamp(0, 3),
+    })));
+    ui.on_time_sig_picked(|i| with_app(|a| a.practice(|c| c.sig = i.clamp(0, 2))));
+    ui.on_count_in_toggled(|on| with_app(|a| a.practice(|c| c.count_in = on)));
+    ui.on_loop_sync_toggled(|on| with_app(|a| a.practice(|c| c.sync = on)));
+    ui.on_trainer_toggled(|on| with_app(|a| a.practice(|c| c.trainer = on)));
+    ui.on_trainer_set(|st, bars, target| with_app(|a| {
+        a.practice(|c| {
+            c.step = st.clamp(1, 10);
+            c.bars = bars.clamp(1, 8);
+            c.target = target.clamp(40, 240);
+        })
     }));
     ui.on_bpm_changed(|b| with_app(|a| a.set_bpm(b)));
     ui.on_tap(|| with_app(|a| a.tap()));
     ui.on_load_ir(|p| with_app(|a| a.load_wav(&p, true)));
     ui.on_load_di(|p| with_app(|a| a.load_wav(&p, false)));
-    // screenshots / debugging: start with the practice drawer open
+    // screenshots / debugging: start on the Practice page
     if std::env::var_os("HAZE_PRACTICE").is_some() {
-        ui.set_practice_open(true);
+        ui.set_page(6);
     }
     ui.on_dsp_voicing_picked(|v| with_app(|a| {
         a.dsp_voicing = Some(v);
@@ -2069,7 +2805,64 @@ fn bind(ui: &MainWindow) {
     ui.on_ab_picked(|i| with_app(|a| a.ab_pick(i)));
     // Pages: Library shows All / Favorites, Setlists shows one collection (the first by default,
     // "" when there is none). The Rig page keeps whatever collection the picker browses.
+    ui.on_tuner_tuning_request(|| with_app(|a| {
+        let opts: Vec<Opt> = haze_dsp::tuner::TUNINGS
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let notes: Vec<&str> = t.strings.iter().map(|&m| haze_dsp::tuner::note_name(m)).collect();
+                Opt { value: i as i32, label: s(format!("{}   {}", t.name, notes.join(" "))) }
+            })
+            .collect();
+        a.popup = Some(Popup::Tuning);
+        let ui = a.ui();
+        ui.set_popup_title(s("Tuning"));
+        ui.set_popup_options(ModelRc::new(VecModel::from(opts)));
+        ui.invoke_open_popup();
+    }));
+    ui.on_tuner_reference_changed(|r| with_app(|a| {
+        a.tu.reference = r.clamp(430, 450);
+        if let Some(t) = a.tuner.as_mut() {
+            t.set_reference(a.tu.reference as f32);
+            t.reset_readout();
+        }
+        a.tu.save(a.lib.root());
+        a.ui().set_tuner_reference(a.tu.reference);
+    }));
+    ui.on_tuner_mute_toggled(|on| with_app(|a| a.set_tuner_mute(on)));
+    ui.on_pcfx_toggled(|card| with_app(|a| {
+        if crate::pcfx::toggle(&a.dsp, card.max(0) as usize) {
+            crate::pcfx::save(a.lib.root(), &a.dsp);
+        }
+        a.show_pcfx();
+    }));
+    ui.on_pcfx_set(|card, ctl, v| with_app(|a| {
+        crate::pcfx::set(&a.dsp, card.max(0) as usize, ctl.max(0) as usize, v);
+        crate::pcfx::save(a.lib.root(), &a.dsp);
+        a.show_pcfx();
+    }));
+    ui.on_tuner_mode_picked(|chromatic| with_app(|a| {
+        a.tu.chromatic = chromatic;
+        a.tu.save(a.lib.root());
+        a.tu.push_settings(&a.ui());
+    }));
     ui.on_page_picked(|page| with_app(|a| {
+        // MUTE belongs to the tuner: leaving the page brings the sound back
+        if page != 4 && a.ui().get_tuner_mute() {
+            a.set_tuner_mute(false);
+        }
+        if page == 5 {
+            a.show_pcfx();
+        }
+        if page == 6 {
+            // looper memory on the first visit, not at start-up
+            a.ensure_loop_buffer();
+        }
+        if page == 4 {
+            // a fresh visit starts with no string marked tuned
+            a.tu.reset_strings();
+            a.tu.push_settings(&a.ui());
+        }
         let in_set = a.nav_sel != "all" && a.nav_sel != "fav";
         match page {
             1 if in_set => a.nav_sel = "all".into(),
@@ -2185,13 +2978,30 @@ fn bind(ui: &MainWindow) {
     ui.on_sort_picked(|v| with_app(|a| {
         a.sort = v;
         a.ui().set_sort(v);
-        save_ui_cfg(a.lib.root(), a.ui_scale, a.sort);
+        a.save_ui();
         a.refresh_list();
+    }));
+    ui.on_skin_picked(|v| with_app(|a| {
+        a.skin = v;
+        a.ui().global::<T>().set_skin(v);
+        a.save_ui();
+        // block colours come from Rust: repaint the chain and the open inspector
+        a.refresh_editor();
+    }));
+    ui.on_effect_names_picked(|v| with_app(|a| {
+        a.effect_names = v;
+        a.ui().global::<T>().set_effect_names(v);
+        a.save_ui();
+    }));
+    ui.on_hints_toggled(|v| with_app(|a| {
+        a.hints = v;
+        a.ui().global::<T>().set_hints(v);
+        a.save_ui();
     }));
     ui.on_ui_scale_picked(|v| with_app(|a| {
         a.ui_scale = v;
         a.ui().set_ui_scale(v);
-        save_ui_cfg(a.lib.root(), a.ui_scale, a.sort);
+        a.save_ui();
         a.apply_scale();
     }));
     ui.on_set_tags(|t| with_app(|a| {
@@ -2404,5 +3214,25 @@ mod drive_tests {
         assert_eq!(d("POWER DRIVE"), 4);
         assert_eq!(d("BROWN VARIATION"), 5);
         assert_eq!(d("R-FIER MODERN"), 5);
+    }
+}
+
+#[cfg(test)]
+mod audio_cfg_tests {
+    use super::{load_audio_cfg, save_audio_cfg};
+
+    #[test]
+    fn guitar_channel_round_trips() {
+        let dir = std::env::temp_dir().join(format!("haze-audio-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for ch in [Some(1), Some(0), None] {
+            let c = haze_dsp::Config { input: Some("front:CARD=CODEC,DEV=0".into()), channel: ch, ..Default::default() };
+            save_audio_cfg(&dir, &c);
+            assert_eq!(load_audio_cfg(&dir).channel, ch);
+        }
+        // configs written before `ch=` existed load as auto
+        std::fs::write(dir.join("audio.conf"), "in=front:CARD=CODEC,DEV=0\nout=\nbuffer=128\nrate=48000\n").unwrap();
+        assert_eq!(load_audio_cfg(&dir).channel, None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

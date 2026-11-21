@@ -259,9 +259,9 @@ component KeyCap inherits Rectangle {
     height: 24px;
     width: Math.max(24px, kt.preferred-width + 14px);
     border-radius: 5px;
-    background: @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    background: #ffffff08;
     border-width: 1px;
-    border-color: #000000c0;
+    border-color: #ffffff12;
     drop-shadow-offset-y: 2px;
     drop-shadow-color: #00000080;
     Rectangle { x: 4px; y: 1px; width: parent.width - 8px; height: 1px; background: #ffffff1c; }
@@ -306,7 +306,7 @@ export component KeysDialog inherits Modal {
                 for col in [
                     [{ k: ["Ctrl", "K"], d: "Find a preset" }, { k: ["Ctrl", "Z"], d: "Undo" }, { k: ["Ctrl", "Y"], d: "Redo" },
                      { k: ["Ctrl", "1…4"], d: "Rig / Library / Setlists / Starters" }, { k: ["Ctrl", "L"], d: "Live view" },
-                     { k: ["Space"], d: "Play / stop the DI loop (Standalone)" }, { k: ["F1"], d: "This card" }],
+                     { k: ["Space"], d: "Play / stop the DI loop (PC engine)" }, { k: ["F1"], d: "This card" }],
                     [{ k: ["Click"], d: "Pedal: open it in the editor" }, { k: ["Footswitch"], d: "Bypass / switch on" },
                      { k: ["Drag", "↕"], d: "Knob on a pedal: turn it" }, { k: ["Scroll"], d: "Knob on a pedal: fine steps" },
                      { k: ["Drag", "↔"], d: "Pedal: move it in the chain" }, { k: ["← →"], d: "Live view: previous / next song" },

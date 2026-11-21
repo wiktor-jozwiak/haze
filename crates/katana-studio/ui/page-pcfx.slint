@@ -1,0 +1,300 @@
+// PC FX page: effects only the PC engine has, after the patch's own chain. One card per
+// effect: a switch (or, for freeze and tape stop, a big latch you hit while playing) and its
+// controls. The model comes from Rust (`PcFxUi`), which owns ranges and value texts; the page
+// only reports "control n of card c moved to v".
+import { T } from "theme.slint";
+
+export struct PcCtl {
+    label: string,
+    /// 0 fader (value 0..1), 1 segmented (index), 2 stepper (index)
+    kind: int,
+    value: float,
+    text: string,
+    options: [string],
+    index: int,
+}
+
+export struct PcCard {
+    title: string,
+    blurb: string,
+    on: bool,
+    /// a latch you hit while playing (freeze, tape stop) instead of an on switch
+    latch: bool,
+    latch-text: string,
+    hue: color,
+    ctls: [PcCtl],
+}
+
+component Fader inherits Rectangle {
+    in property <float> value;
+    in property <string> text;
+    in property <color> hue;
+    callback moved(float);
+    height: 26px;
+    border-radius: 6px;
+    background: T.well;
+    border-width: 1px;
+    border-color: ta.has-hover ? T.line-hi : T.line;
+    Rectangle {
+        x: 0;
+        width: max(4px, parent.width * clamp(root.value, 0, 1));
+        border-radius: 6px;
+        background: root.hue.with-alpha(0.3);
+    }
+    Rectangle {
+        x: max(0px, parent.width * clamp(root.value, 0, 1) - 2px);
+        width: 3px;
+        background: root.hue;
+    }
+    Text {
+        x: parent.width - self.width - 10px;
+        text: root.text;
+        color: T.text;
+        font-family: T.mono;
+        font-size: 11px;
+    }
+    ta := TouchArea {
+        mouse-cursor: ew-resize;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.moved(clamp(self.mouse-x / self.width, 0, 1));
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.moved(clamp(self.mouse-x / self.width, 0, 1));
+            }
+        }
+    }
+}
+
+component SegBtn inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <color> hue;
+    callback clicked;
+    height: 24px;
+    border-radius: 5px;
+    background: active ? hue.with-alpha(0.22) : ta.has-hover ? T.hover : transparent;
+    Text {
+        text: root.text;
+        color: root.active ? T.text : T.text-2;
+        font-size: 11px;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Arrow inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: ta.pressed ? T.well : ta.has-hover ? T.hover : T.panel-hi;
+    Text {
+        text: root.text;
+        color: T.text-2;
+        font-size: 13px;
+        font-weight: 700;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Card inherits Rectangle {
+    in property <PcCard> card;
+    in property <bool> engine;
+    callback toggled;
+    callback set(int, float);
+    border-radius: 14px;
+    background: @linear-gradient(180deg, T.panel-hi 0%, T.panel 100%);
+    border-width: 1px;
+    border-color: card.on ? card.hue.with-alpha(0.7) : T.line;
+    clip: true;
+    // a wash of the card's colour while it runs
+    if root.card.on: Rectangle {
+        background: @radial-gradient(circle, root.card.hue.with-alpha(0.13) 0%, root.card.hue.with-alpha(0) 70%);
+    }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: space-between;
+            VerticalLayout {
+                spacing: 3px;
+                Text {
+                    text: root.card.title;
+                    color: T.text;
+                    font-family: T.display;
+                    font-size: 18px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: root.card.blurb;
+                    color: T.text-3;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+            }
+            // on switch: a lamp key
+            if !root.card.latch: Rectangle {
+                width: 58px;
+                height: 28px;
+                border-radius: 14px;
+                background: root.card.on ? root.card.hue.with-alpha(0.85) : T.well;
+                border-width: 1px;
+                border-color: root.card.on ? root.card.hue : T.line-hi;
+                Rectangle {
+                    x: root.card.on ? parent.width - self.width - 4px : 4px;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: root.card.on ? #fff : T.text-3;
+                    animate x { duration: 120ms; }
+                }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.toggled(); }
+                }
+            }
+        }
+        for c[ci] in root.card.ctls: HorizontalLayout {
+            spacing: 10px;
+            Text {
+                width: 74px;
+                text: c.label;
+                color: T.text-2;
+                font-size: 11px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if c.kind == 0: Fader {
+                horizontal-stretch: 1;
+                value: c.value;
+                text: c.text;
+                hue: root.card.hue;
+                moved(v) => { root.set(ci, v); }
+            }
+            if c.kind == 1: Rectangle {
+                horizontal-stretch: 1;
+                height: 30px;
+                border-radius: 7px;
+                background: T.well;
+                border-width: 1px;
+                border-color: T.line;
+                HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
+                    for o[oi] in c.options: SegBtn {
+                        horizontal-stretch: 1;
+                        text: o;
+                        active: oi == c.index;
+                        hue: root.card.hue;
+                        clicked => { root.set(ci, oi); }
+                    }
+                }
+            }
+            if c.kind == 2: HorizontalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+                Arrow {
+                    text: "‹";
+                    clicked => { root.set(ci, max(0, c.index - 1)); }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 26px;
+                    border-radius: 6px;
+                    background: T.well;
+                    border-width: 1px;
+                    border-color: T.line;
+                    Text {
+                        text: c.options[c.index];
+                        color: T.text;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+                }
+                Arrow {
+                    text: "›";
+                    clicked => { root.set(ci, min(c.options.length - 1, c.index + 1)); }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        // latch: the big key you hit while playing
+        if root.card.latch: Rectangle {
+            height: 52px;
+            border-radius: 10px;
+            background: root.card.on ? root.card.hue.with-alpha(0.85) : lt.pressed ? T.well : lt.has-hover ? T.hover : T.panel-hi;
+            border-width: 1px;
+            border-color: root.card.on ? root.card.hue : T.line-hi;
+            drop-shadow-blur: root.card.on ? 18px : 0px;
+            drop-shadow-color: root.card.hue.with-alpha(0.5);
+            Text {
+                text: root.card.latch-text;
+                color: root.card.on ? #fff : T.text;
+                font-family: T.display;
+                font-size: 15px;
+                font-weight: 700;
+                letter-spacing: 1.5px;
+            }
+            lt := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.toggled(); }
+            }
+        }
+    }
+}
+
+export component PcFxPage inherits VerticalLayout {
+    /// the PC engine runs (the page still edits settings when it does not)
+    in property <bool> engine;
+    in property <[PcCard]> cards;
+    in property <int> bpm;
+    callback toggled(int);
+    callback set(int, int, float);
+    padding: 12px;
+    spacing: 12px;
+    HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: "PC FX";
+                color: T.text;
+                font-family: T.display;
+                font-size: 22px;
+                font-weight: 700;
+            }
+            Text {
+                text: root.engine
+                    ? "Effects the amp can't do, after the patch's chain. Rhythm follows the practice tempo (" + root.bpm + " BPM)."
+                    : "Start the PC engine to hear these. Settings are kept.";
+                color: T.text-3;
+                font-size: 12px;
+            }
+        }
+    }
+    for row in 2: HorizontalLayout {
+        spacing: 12px;
+        vertical-stretch: 1;
+        for col in 3: Card {
+            // equal preferred widths: the three cards share the row evenly
+            preferred-width: 300px;
+            min-width: 200px;
+            horizontal-stretch: 1;
+            card: root.cards[row * 3 + col];
+            engine: root.engine;
+            toggled => { root.toggled(row * 3 + col); }
+            set(ci, v) => { root.set(row * 3 + col, ci, v); }
+        }
+    }
+}

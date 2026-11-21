@@ -59,10 +59,10 @@ export component MenuItem inherits Rectangle {
 }
 
 export component Menu inherits Rectangle {
-    background: @linear-gradient(180deg, #262422 0%, #1A1918 100%);
-    border-radius: 8px;
+    background: #1C1D22;
+    border-radius: 12px;
     border-width: 1px;
-    border-color: #000000;
+    border-color: #ffffff14;
     drop-shadow-blur: 24px;
     drop-shadow-offset-y: 10px;
     drop-shadow-color: #000000c0;
@@ -76,15 +76,14 @@ export component SlotChip inherits Rectangle {
     callback push;
     height: 40px;
     border-radius: 6px;
-    background: slot.current ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%)
-        : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%)
-        : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    background: slot.current ? #ffffff14
+        : ta.has-hover ? #ffffff10
+        : #ffffff08;
     border-width: 1px;
-    border-color: #000000c0;
+    border-color: #ffffff12;
     drop-shadow-blur: slot.current ? 0 : 3px;
     drop-shadow-offset-y: 1px;
     drop-shadow-color: #00000080;
-    if !slot.current: Rectangle { x: 5px; y: 1px; width: parent.width - 10px; height: 1px; background: #ffffff16; }
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -146,9 +145,9 @@ export component ModeBtn inherits Rectangle {
     callback clicked;
     width: row.preferred-width + 28px;
     border-radius: 6px;
-    background: active ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%) : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    background: active ? #ffffff14 : ta.has-hover ? #ffffff10 : #ffffff08;
     border-width: 1px;
-    border-color: #000000c0;
+    border-color: #ffffff12;
     row := HorizontalLayout {
         x: 14px;
         spacing: 8px;
@@ -186,18 +185,19 @@ export component Pick inherits Rectangle {
     width: Math.min(t.preferred-width + 16px, self.max-width);
     height: 26px;
     border-radius: 5px;
-    background: active ? @linear-gradient(180deg, T.accent-hi 0%, T.accent.darker(0.1) 100%)
-        : ta.has-hover && enabled ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%)
-        : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    // active = tinted, not filled: a solid accent fill is kept for the one main action (Connect)
+    background: active ? T.accent.with-alpha(0.16)
+        : ta.has-hover && enabled ? #ffffff10
+        : #ffffff08;
     border-width: 1px;
-    border-color: #000000b0;
+    border-color: active ? T.accent.with-alpha(0.55) : #ffffff12;
     t := Text {
         x: 8px;
         width: parent.width - 16px;
         horizontal-alignment: center;
         overflow: elide;
         text: root.text;
-        color: !enabled ? T.text-off : active ? T.accent-ink : T.silk;
+        color: !enabled ? T.text-off : active ? T.accent-hi : T.silk;
         font-family: T.display;
         font-weight: 700;
         font-size: 13px;
@@ -327,24 +327,22 @@ export component ToolBtn inherits Rectangle {
     in property <string> text;
     in property <string> icon;
     in property <bool> enabled: true;
+    in property <string> tip;
     callback clicked;
-    width: row.preferred-width + 26px;
+    width: text == "" ? 34px : row.preferred-width + 26px;
     height: 34px;
-    border-radius: 6px;
-    background: !enabled ? transparent : ta.pressed ? @linear-gradient(180deg, #121110 0%, #1F1D1B 100%) : ta.has-hover ? @linear-gradient(180deg, #3A3734 0%, #201E1C 100%) : @linear-gradient(180deg, #2E2B28 0%, #1A1917 100%);
+    border-radius: 8px;
+    background: !enabled ? transparent : ta.pressed ? #ffffff14 : ta.has-hover ? #ffffff0d : #ffffff06;
     border-width: 1px;
-    border-color: enabled ? #000000c0 : T.line;
-    drop-shadow-blur: enabled ? 3px : 0;
-    drop-shadow-offset-y: 1px;
-    drop-shadow-color: #00000080;
+    border-color: #ffffff10;
     row := HorizontalLayout {
-        x: 12px;
+        x: root.text == "" ? 9px : 12px;
         spacing: 7px;
         if icon != "": VerticalLayout {
             alignment: center;
             Icon { d: root.icon; size: 16px; tint: enabled ? T.text-2 : T.text-off; }
         }
-        Text {
+        if root.text != "": Text {
             text: root.text;
             color: enabled ? T.text : T.text-off;
             font-size: 12.5px;
@@ -356,5 +354,10 @@ export component ToolBtn inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+    if ta.has-hover && tip != "": Tip {
+        x: parent.width - self.width;
+        y: parent.height + 8px;
+        text: root.tip;
     }
 }

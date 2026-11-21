@@ -10,5 +10,8 @@ hound = "3.5.1"
 realfft = "3.5.1"
 rtrb = "0.4.1"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 rtrb = "0.4.1"
